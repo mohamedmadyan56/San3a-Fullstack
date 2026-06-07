@@ -24,11 +24,7 @@ const userSchema = new mongoose.Schema({
         minlength: 8,
         select: false
     },
-    passwordConfrim:{
-        type:String,
-        required:[true,'please comfirm your password'],
-
-    },
+  
     role: {
         type: String,
         enum: ['customer', 'artisan', 'admin'],
@@ -37,7 +33,7 @@ const userSchema = new mongoose.Schema({
     avatar:{
         type: String,
         default: 'default.png'
-    },
+    },  passwordChangedAt: Date,
     isActive:{
         type: Boolean,
         default: true,
@@ -59,6 +55,12 @@ userSchema.pre('save', async function(){
 userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
     return await bcrypt.compare(candidatePassword, userPassword);
 };
-
+userSchema.methods.changePasswordAfter = function(JWTTimestamp) {
+  if (this.passwordChangedAt) {
+    const changedTimestamp = parseInt(this.passwordChangedAt.getTime() / 1000, 10);
+    return JWTTimestamp < changedTimestamp;
+  }
+  return false;
+};
 const User = mongoose.model('User', userSchema);
 module.exports = User;

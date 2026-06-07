@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
-
+const { promisify } = require('util');
 // دالة مساعدة لعمل الـ Token
 const signToken = id => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -8,7 +8,7 @@ const signToken = id => {
   });
 };
 
-// 1) SIGNUP - إنشاء حساب جديد
+
 exports.signup = async (req, res) => {
   try {
     const newUser = await User.create({
@@ -20,7 +20,7 @@ exports.signup = async (req, res) => {
     });
 
     const token = signToken(newUser._id);
-    newUser.password = undefined; // إخفاء الباسورد من الرد
+    newUser.password = undefined; 
 
     res.status(201).json({
       status: 'success',
@@ -29,21 +29,20 @@ exports.signup = async (req, res) => {
     });
 
   } catch (err) {
-    // لو حصل مشكلة (مثلاً الإيميل متكرر أو بيانات ناقصة) الـ catch بتمسكها هنا
     res.status(400).json({
       status: 'fail',
       message: 'عذراً، حدث خطأ أثناء إنشاء الحساب',
-      error: err.message // هيعرض لك سبب الخطأ بالظبط عشان تراجع وتفهم المشكلة فين
+      error: err.message 
     });
   }
 };
 
-// 2) LOGIN - تسجيل الدخول
+
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1- التأكد من إدخال البيانات
+
     if (!email || !password) {
       return res.status(400).json({
         status: 'fail',
@@ -51,7 +50,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 2- البحث عن المستخدم ومقارنة الباسورد
+   
     const user = await User.findOne({ email }).select('+password');
 
     if (!user || !(await user.correctPassword(password, user.password))) {
@@ -61,7 +60,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 3- إرسال التوكن لو البيانات صحيحة
+
     const token = signToken(user._id);
     user.password = undefined;
 
@@ -78,4 +77,76 @@ exports.login = async (req, res) => {
       error: err.message
     });
   }
+};
+
+exports.protect = async (req, res, next) => {
+  try {
+    let token;
+
+    // 1) البحث في الهيدرز (للموبايل أو الـ Postman)
+    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+      token = req.headers.authorization.split(" ")[1];
+    } 
+    // 2) البحث في الكوكيز (للمتصفح والفرونت إيند بتاعك)
+    else if (req.cookies && req.cookies.user_token) { 
+      token = req.cookies.user_token;
+    }
+
+    console.log("Token detected:", token); // عشان تطمن في التيرمنال إن التوكن مقروءة
+
+    // لو مفيش توكن خالص
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    // 3) التحقق من صحة التوكن (الـ Verification)
+    // لو التوكن منتهية أو ملعوب فيها، السطر ده هيرمي خطأ فوراً والـ catch هتمسكه
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // 4) التأكد من أن المستخدم لسه موجود وحسابه نشط
+    const currentUser = await User.findById(decoded.id).select('+active');
+    
+    if (!currentUser || currentUser.active === false) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The token belonging to this user does no longer exist or user is inactive.'
+      });
+    }
+
+    // 5) التأكد إذا كان المستخدم غيّر الباسورد بعد صدور التوكن
+    if (currentUser.changePasswordAfter(decoded.iat)) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'User recently changed password. Please log in again.'
+      });
+    }
+
+    // لو كله تمام، بنخزن بيانات المستخدم في الـ req عشان الـ routes اللي بعد كده
+    req.user = currentUser;
+    next();
+
+  } catch (err) {
+    // الـ catch هنا بتمسك أي مشكلة في فك شفرة الـ JWT (زي منتهي الصلاحية أو خطأ سينتكس)
+    return res.status(401).json({
+      status: 'fail',
+      message: 'Invalid token or token has expired. Please log in again.',
+      error: err.message
+    });
+  }
+};
+
+exports.restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        status: 'fail',
+        message: "you don't have permission to perform this action"
+      });
+    }
+
+    next();
+  };
 };

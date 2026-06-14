@@ -1,45 +1,115 @@
-export default function RegisterPage() {
+'use client';
+
+import React, { useState } from 'react';
+import axios from 'axios';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { toast } from 'react-hot-toast';
+
+export default function LoginPage() {
+  const router = useRouter();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    // تشغيل الـ Toast اللودينج الاحترافي
+    const loginToast = toast.loading('جاري التحقق من البيانات...');
+
+    try {
+      const response = await axios.post(
+        'http://localhost:5000/api/v1/users/login',
+        { email, password }
+      );
+
+      if (response.data.status === 'success') {
+         localStorage.setItem('user_token', response.data.token);
+        const { token, data } = response.data;
+        const userRole = data?.user?.role || 'customer';
+
+        // تخزين بيانات الجلسة في المتصفح
+        localStorage.setItem('user_token', token);
+        localStorage.setItem('user_role', userRole);
+        localStorage.setItem('user_name', data?.user?.name || '');
+
+        // تحويل الـ Toast لـ النجاح
+        toast.success(`مرحبًا بعودتك يا ${data?.user?.name || ''} 🎉`, {
+          id: loginToast,
+        });
+
+        // التوجيه الذكي للمستخدم بناءً على الـ Role
+        setTimeout(() => {
+          if (userRole === 'craftsman') {
+            router.push('/dashboard/craftsman');
+          } else {
+            router.push('/');
+          }
+        }, 800);
+      }
+    } catch (err: any) {
+      // لقط رسالة الخطأ القادمة من الـ Backend (زي الباسورد الغلط اللي مطلع 401 في السكرين)
+      const msg =
+        err.response?.data?.message ||
+        'بريد إلكتروني أو كلمة مرور غير صحيحة، تأكد وحاول مجدداً';
+      
+      // تحويل نفس الـ Toast لـ خطأ
+      toast.error(msg, {
+        id: loginToast,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-row-reverse bg-white">
-      {/* Right Section */}
+
+      {/* ===== الجانب الأيمن (بنر الترحيب) ===== */}
       <div className="hidden lg:flex w-1/2 bg-gradient-to-b from-[#071C35] to-[#02111F] text-white relative">
         <div className="w-full flex flex-col justify-center px-16">
-          <div className="absolute top-10 right-10 text-xl font-bold">
-            صنعة
+
+          <div className="absolute top-8 right-8">
+            <Image
+              src="/logo.png"
+              alt="Logo"
+              width={140}
+              height={45}
+              priority
+              className="object-contain"
+            />
           </div>
 
-          <h1 className="text-6xl font-extrabold leading-tight mb-6">
-            انضم إلى مجتمعنا من
-            <br />
-            المحترفين الموثوقين
-            <br />
-            وأصحاب المنازل السعداء
+          <h1 className="text-5xl font-extrabold leading-tight mb-6">
+            مرحبًا بعودتك<br />
+            إلى منصة صنعة
           </h1>
 
           <p className="text-gray-300 text-lg mb-12">
-            المنصة الأكثر موثوقية لخدمات المنازل الذكية الاحترافية.
-            <br />
-            آمنة، موثوقة، وسلسة.
+            سجل الدخول للوصول إلى حسابك وإدارة خدماتك بسهولة.
           </p>
 
           <div className="space-y-6">
             <div className="flex items-center gap-3 justify-end">
-              <span>شبكة محترفين موثقة</span>
-              <div className="w-8 h-8 rounded-full border border-green-400 flex items-center justify-center">
+              <span>تجربة استخدام سريعة</span>
+              <div className="w-8 h-8 rounded-full border border-green-400 flex items-center justify-center text-green-400">
                 ✓
               </div>
             </div>
 
             <div className="flex items-center gap-3 justify-end">
-              <span>حماية دفع آمنة</span>
-              <div className="w-8 h-8 rounded-full border border-green-400 flex items-center justify-center">
+              <span>حساب آمن بالكامل</span>
+              <div className="w-8 h-8 rounded-full border border-green-400 flex items-center justify-center text-green-400">
                 🛡
               </div>
             </div>
 
             <div className="flex items-center gap-3 justify-end">
-              <span>دعم فني متخصص على مدار الساعة</span>
-              <div className="w-8 h-8 rounded-full border border-green-400 flex items-center justify-center">
+              <span>دعم مستمر 24/7</span>
+              <div className="w-8 h-8 rounded-full border border-green-400 flex items-center justify-center text-green-400">
                 🎧
               </div>
             </div>
@@ -47,119 +117,86 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* Left Section */}
+      {/* ===== الجانب الأيسر (الفورم) ===== */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
         <div className="w-full max-w-xl" dir="rtl">
-          <div className="text-center mb-10">
-            <h2 className="text-5xl font-bold text-gray-900 mb-3">
-              إنشاء حساب
+
+          {/* اللوجو فوق الفورم */}
+          <div className="flex justify-center mb-8">
+            <Image
+              src="/logo.png"
+              alt="Logo"
+              width={180}
+              height={60}
+              priority
+              className="object-contain"
+            />
+          </div>
+
+          <div className="text-center mb-8">
+            <h2 className="text-4xl font-bold text-gray-900 mb-2">
+              تسجيل الدخول
             </h2>
-
-            <p className="text-gray-500">
-              ابدأ رحلتك مع صنعة اليوم.
-            </p>
+            <p className="text-gray-500">أدخل بياناتك للمتابعة</p>
           </div>
 
-          {/* Account Type */}
-          <div className="grid grid-cols-2 gap-3 mb-8">
-            <button className="bg-[#007A4D] text-white py-4 rounded-xl font-medium">
-              أنا عميل
-            </button>
+          {/* الفورم */}
+          <form onSubmit={handleSubmit} className="space-y-5">
 
-            <button className="bg-[#EEF5F1] text-gray-700 py-4 rounded-xl font-medium">
-              أنا فني محترف
-            </button>
-          </div>
-
-          <form className="space-y-5">
             <div>
-              <label className="block mb-2 text-gray-700">
-                الاسم الكامل
+              <label className="block mb-2 text-gray-700 font-medium">
+                البريد الإلكتروني
               </label>
-
               <input
-                type="text"
-                placeholder="أدخل اسمك الكامل"
-                className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D]"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+                className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D] text-gray-900"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block mb-2 text-gray-700">
-                  البريد الإلكتروني
-                </label>
-
-                <input
-                  type="email"
-                  placeholder="name@example.com"
-                  className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D]"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-2 text-gray-700">
-                  رقم الهاتف
-                </label>
-
-                <input
-                  type="tel"
-                  placeholder="+20 100 000 0000"
-                  className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D]"
-                />
-              </div>
-            </div>
-
             <div>
-              <label className="block mb-2 text-gray-700">
+              <label className="block mb-2 text-gray-700 font-medium">
                 كلمة المرور
               </label>
-
               <input
                 type="password"
-                placeholder="8 أحرف على الأقل"
-                className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D]"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <label className="text-gray-700">
-                أوافق على الشروط وسياسة الخصوصية
-              </label>
-
-              <input
-                type="checkbox"
-                className="w-5 h-5 accent-[#007A4D]"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D] text-gray-900"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full bg-[#007A4D] hover:bg-[#006341] transition text-white py-4 rounded-xl text-lg font-medium"
+              disabled={isLoading}
+              className="w-full bg-[#007A4D] hover:bg-[#006341] disabled:bg-gray-400 transition text-white py-4 rounded-xl text-lg font-medium"
             >
-              إنشاء الحساب
+              {isLoading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
             </button>
           </form>
 
+          {/* الروابط السفلية */}
           <div className="text-center mt-8">
-            <span className="text-gray-500">
-              لديك حساب بالفعل؟
-            </span>
-
-            <button className="mr-2 font-semibold text-gray-900">
-              تسجيل الدخول
+            <span className="text-gray-500">ليس لديك حساب؟</span>
+            <button
+              type="button"
+              onClick={() => router.push('/signup')}
+              className="mr-2 font-semibold text-gray-900 hover:underline"
+            >
+              إنشاء حساب
             </button>
           </div>
 
           <div className="flex justify-center gap-6 mt-12 text-lg">
-            <button className="text-[#007A4D] font-medium">
-              العربية
-            </button>
-
-            <button className="text-gray-500">
-              English
-            </button>
+            <button className="text-[#007A4D] font-medium">العربية</button>
+            <button className="text-gray-500">English</button>
           </div>
+
         </div>
       </div>
     </div>

@@ -107,9 +107,9 @@ exports.protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // 4) التأكد من أن المستخدم لسه موجود وحسابه نشط
-    const currentUser = await User.findById(decoded.id).select('+active');
+    const currentUser = await User.findById(decoded.id).select('+isActive');
     
-    if (!currentUser || currentUser.active === false) {
+    if (!currentUser || currentUser.isActive === false) {
       return res.status(401).json({
         status: 'fail',
         message: 'The token belonging to this user does no longer exist or user is inactive.'

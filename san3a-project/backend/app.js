@@ -1,17 +1,34 @@
 const express = require('express');
 const cors = require('cors');
+
 const userRouter = require('./src/routes/userRoutes');
-
-
+const serviceRouter = require('./src/routes/serviceRoutes');
+const requestRouter = require('./src/routes/requestRoutes');
 const app = express();
-app.use(cors());
-app.use(express.json());
 
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  optionsSuccessStatus: 200,
+};
 
-app.use('/api/v1/users',userRouter);
-app.get('/',(req,res)=>{
-    res.send('server is working .... ');
-    
-})
+app.use(cors(corsOptions));
 
-module.exports=app;
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+app.use('/api/v1/users', userRouter);
+app.use('/api/v1/services', serviceRouter);
+app.use('/api/v1/requests', requestRouter);
+app.get('/', (req, res) => {
+  res.send('server is working .... ');
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    status: 'fail',
+    message: `can't find ${req.originalUrl} on this server ! `
+  });
+});
+module.exports = app;

@@ -116,3 +116,64 @@ exports.getRequest = async (req, res) => {
         });
     }
 };
+
+
+// 4. قبول الطلب من طرف الحرفي (Accept Request)
+exports.acceptRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+
+    // 1. التأكد إن اللي بيطلبالمسار ده هو فني (Craftsman) فعلاً
+    // (الـ protect middleware بيكون حاطط بيانات الفني في req.user)
+    if (req.user.role !== 'craftsman') {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'غير مسموح لك بقبول هذا الطلب، هذا الإجراء مخصص للفنيين فقط'
+      });
+    }
+
+    // 2. البحث عن الطلب والتأكد إنه لسه منتظر فني ومحدش خطفه قبله!
+    const currentRequest = await Request.findById(requestId);
+    
+    if (!currentRequest) {
+      return res.status(404).json({ status: 'fail', message: 'الطلب غير موجود' });
+    }
+
+    if (currentRequest.status !== 'PENDING_MATCHING') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'عذراً، هذا الطلب لم يعد متاحاً (تم قبوله من فني آخر أو تم إلغاؤه)'
+      });
+    }
+
+    // 3. تحديث بيانات الطلب: ربطه بالفني وتغيير الحالة
+    currentRequest.craftsman = req.user._id;
+    currentRequest.status = 'ACCEPTED';
+    
+    // تسجيل تغيير الحالة في تاريخ الطلب (لو عامل فيلد للـ history)
+    currentRequest.statusHistory.push({
+      status: 'ACCEPTED',
+      changedAt: Date.now()
+    });
+
+    await currentRequest.save();
+
+    // 4. تغيير حالة الفني لـ "مشغول" في جدول الـ Users
+    await User.findByIdAndUpdate(req.user._id, { isAvailable: false });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'تم قبول الطلب بنجاح، بالتوفيق في عملك!',
+      data: {
+        request: currentRequest
+      }
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      status: 'error',
+      message: 'حدث خطأ أثناء قبول الطلب',
+      error: err.message
+    });
+  }
+};

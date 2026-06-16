@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const { promisify } = require('util');
+const sendEmail = require('../utils/email');
+
 // دالة مساعدة لعمل الـ Token
 const signToken = id => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -150,3 +152,51 @@ exports.restrictTo = (...roles) => {
     next();
   };
 };
+exports.forgotPassword = async (req, res, next) => {
+  const user = await User.findOne({ email: req.body.email });
+
+  if (!user) {
+    return res.status(404).json({
+      message: 'لا يوجد مستخدم بهذا البريد'
+    });
+  }
+
+  const resetToken = user.createPasswordResetToken();
+
+  await user.save({ validateBeforeSave: false });
+
+  const resetURL = `${req.protocol}://${req.get('host')}/api/v1/users/resetPassword/${resetToken}`;
+
+  const message = `
+    نسيت كلمة المرور؟
+    اضغط على الرابط التالي:
+    ${resetURL}
+  `;
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: 'Reset Password',
+      message
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'تم إرسال الإيميل'
+    });
+
+  } catch (err) {
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+
+    await user.save({ validateBeforeSave: false });
+
+    return res.status(500).json({
+      message: 'حدث خطأ في إرسال الإيميل',
+      error:err.message,
+    });
+  }
+};
+exports.resetPassword=(req,res,next)=>{
+
+}

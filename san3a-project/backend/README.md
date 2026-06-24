@@ -1,21 +1,23 @@
 # San3a Backend 🛠️
 
-**San3a** (صنعة) is a Node.js REST API for a home-services marketplace that connects customers with nearby craftsmen for plumbing, electrical, AC repair, cleaning, and similar services.
+**San3a** (صنعة) is a Node.js REST API for a smart home-services marketplace. It connects customers with nearby craftsmen using geospatial search and a weighted match-scoring algorithm, then manages the full request lifecycle from matching through completion.
 
-Built with **Express 5**, **MongoDB**, and **Mongoose 9**.
+Built with **Express 5**, **MongoDB**, **Mongoose 9**, and **Docker**.
 
 ---
 
 ## Features
 
-- **User authentication** — JWT-based signup and login with role support (`customer`, `craftsman`, `admin`)
-- **Password reset** — Email-based forgot/reset password flow (partial implementation)
-- **Service catalog** — CRUD-ready service listing for the landing page
+- **JWT authentication** — Signup, login, role-based access (`customer`, `craftsman`, `admin`)
+- **Password reset** — Email-based forgot/reset flow via Nodemailer
+- **Service catalog** — List and create home services (with seed script)
 - **Service requests** — Customers create orders with location, notes, and scheduling
-- **Dynamic pricing** — Base fee + emergency fee for immediate requests
-- **Geospatial matching** — Find available craftsmen within 10 km using MongoDB `$near`
+- **Dynamic pricing** — Base fee (120) + emergency fee (30) for immediate requests
+- **Geospatial discovery** — Find nearby craftsmen with `$geoNear` (configurable radius)
+- **Smart match scoring** — Rank craftsmen by distance (40%), rating (30%), response time (20%), and client history (10%)
+- **Craftsman response tracking** — Accept/reject flows with running average response time
 - **Request lifecycle** — Status tracking from `PENDING_MATCHING` through `COMPLETED`
-- **Role-based access** — `protect` and `restrictTo` middleware for route authorization
+- **Docker support** — Multi-stage production image + docker-compose with MongoDB
 
 ---
 
@@ -28,6 +30,7 @@ Built with **Express 5**, **MongoDB**, and **Mongoose 9**.
 | MongoDB / Mongoose | ^9.6.3 |
 | jsonwebtoken | ^9.0.3 |
 | bcryptjs | ^3.0.3 |
+| nodemailer | ^6.10.1 |
 | cors | ^2.8.6 |
 | dotenv | ^17.4.2 |
 | validator | ^13.15.35 |
@@ -37,15 +40,9 @@ Built with **Express 5**, **MongoDB**, and **Mongoose 9**.
 ## Installation
 
 ```bash
-# Clone the repository and navigate to backend
 cd backend
-
-# Install dependencies
 npm install
-
-# Copy environment template
 cp .env.example .env
-
 # Edit .env with your MongoDB URI, JWT secret, and email credentials
 ```
 
@@ -61,11 +58,11 @@ cp .env.example .env
 | `NODE_ENV` | No | `development` or `production` |
 | `FRONTEND_URL` | No | CORS origin (default: `http://localhost:3000`) |
 | `EMAIL_HOST` | For password reset | SMTP host |
-| `EMAIL_PORT` | For password reset | SMTP port |
+| `EMAIL_PORT` | For password reset | SMTP port (default: `587`) |
 | `EMAIL_USERNAME` | For password reset | SMTP username |
 | `EMAIL_PASSWORD` | For password reset | SMTP password |
 
-See `.env.example` for a full template.
+See `.env.example` for the full template.
 
 ---
 
@@ -85,12 +82,23 @@ npm start
 npm run start:prod
 ```
 
-Expected console output:
+### Seed services
 
+```bash
+node seed.js
 ```
-✅ Database connected successfully!
-🚀 Server is running and listening on port 5000...
+
+Seeds: Cleaning, AC, Plumbing, Electricity.
+
+### Docker
+
+```bash
+# Set MONGO_URI, JWT_SECRET, etc. in .env first
+docker compose up --build
 ```
+
+- API: `http://localhost:5000`
+- MongoDB: `localhost:27017`
 
 ---
 
@@ -102,34 +110,35 @@ Expected console output:
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/users/signup` | No | Register new user |
-| POST | `/users/login` | No | Login and receive JWT |
-| POST | `/users/forgotPassword` | No | Send password reset email |
-| POST | `/users/resetPassword/:token` | No | Reset password with token |
-| GET | `/users/profile` | Yes | Get authenticated user profile |
+| POST | `/users/signup` | No | Register |
+| POST | `/users/login` | No | Login → JWT |
+| POST | `/users/forgotPassword` | No | Send reset email |
+| POST | `/users/resetPassword/:token` | No | Reset password |
+| GET | `/users/profile` | Yes | Get profile |
 | GET | `/users/admin-dashboard` | Admin | Admin test route |
-| GET | `/users/craftsman-orders` | Craftsman/Admin | Craftsman test route |
+| GET | `/users/craftsman-orders` | Craftsman | Craftsman test route |
 
 ### Services — `/services`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/services/` | No | List active services |
-| POST | `/services/` | No | Create a service |
+| POST | `/services/` | No | Create service |
 
 ### Requests — `/requests`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/requests/` | Yes | Create a service request |
-| GET | `/requests/:id` | Yes | Get request by ID |
-| GET | `/requests/:requestId/nearby-craftsmen` | Yes | Find nearby available craftsmen |
-| PATCH | `/requests/:requestId/status` | Yes | Update request status |
-| PATCH | `/requests/:requestId/complete` | Yes | Mark request as completed |
+| POST | `/requests/` | Yes | Create request |
+| GET | `/requests/:id` | Yes | Get request |
+| GET | `/requests/:requestId/nearby-craftsmen` | Yes | Nearby craftsmen (`?radius=` meters) |
+| GET | `/requests/:requestId/match-results` | Yes | Ranked match scores (`?radius=` meters) |
+| POST | `/requests/:requestId/accept` | Yes | Craftsman accepts |
+| POST | `/requests/:requestId/reject` | Yes | Craftsman rejects |
+| PATCH | `/requests/:requestId/status` | Yes | Update status |
+| PATCH | `/requests/:requestId/complete` | Yes | Complete request |
 
-> **Note:** `acceptRequest` exists in the controller but is not yet exposed as a route.
-
-### Authentication Header
+### Auth Header
 
 ```
 Authorization: Bearer <your_jwt_token>
@@ -141,60 +150,51 @@ Authorization: Bearer <your_jwt_token>
 
 ```
 backend/
-├── server.js                          # Entry point, DB connection
-├── app.js                             # Express app setup
+├── server.js              # Entry point, DB connection
+├── app.js                 # Express app setup
+├── seed.js                # Service catalog seeder
+├── Dockerfile             # Production container
+├── docker-compose.yml     # MongoDB + backend
 ├── package.json
 ├── .env.example
-├── SAN3A_BACKEND_DOCUMENTATION.md     # Full technical documentation
+├── SAN3A_BACKEND_DOCUMENTATION.md
 └── src/
     ├── controllers/
-    │   ├── authController.js          # Auth, JWT, password reset
-    │   ├── requestController.js       # Requests & geospatial matching
-    │   └── serviceController.js       # Service catalog
+    │   ├── authController.js
+    │   ├── requestController.js
+    │   └── serviceController.js
     ├── models/
-    │   ├── userModel.js               # User schema & password hooks
-    │   ├── requestModel.js            # Request/order schema
-    │   └── serviceModel.js            # Service catalog schema
+    │   ├── userModel.js
+    │   ├── requestModel.js
+    │   └── serviceModel.js
     ├── routes/
     │   ├── userRoutes.js
     │   ├── requestRoutes.js
     │   └── serviceRoutes.js
     └── utils/
-        └── email.js                   # Nodemailer email sender
+        └── email.js
 ```
 
 ---
 
-## Database Collections
+## Match Scoring
 
-| Collection | Model | Purpose |
-|------------|-------|---------|
-| `users` | User | Customers, craftsmen, admins |
-| `services` | Service | Service type catalog |
-| `requests` | Request | Customer service orders |
+Craftsmen are ranked using a weighted formula:
 
----
+| Factor | Weight |
+|--------|--------|
+| Distance | 40% |
+| Rating | 30% |
+| Avg response time | 20% |
+| Prior jobs with same client | 10% |
 
-## Seed Data
-
-No automated seed script is included. Create services manually:
-
-```bash
-curl -X POST http://localhost:5000/api/v1/services/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nameAr": "سباكة",
-    "nameEn": "Plumbing",
-    "slug": "plumbing",
-    "icon": "wrench"
-  }'
-```
+Endpoint: `GET /api/v1/requests/:requestId/match-results`
 
 ---
 
 ## Documentation
 
-For complete technical documentation covering architecture, database schemas, authentication flows, security analysis, and API internals, see:
+Full technical documentation (architecture, database schemas, auth flows, security review, deployment):
 
 **[SAN3A_BACKEND_DOCUMENTATION.md](./SAN3A_BACKEND_DOCUMENTATION.md)**
 
@@ -202,30 +202,27 @@ For complete technical documentation covering architecture, database schemas, au
 
 ## Known Limitations
 
-- Password reset handler (`resetPassword`) is incomplete — no success response returned
-- Craftsman accept-request endpoint not wired to routes
-- `nodemailer` is used in code but not listed in `package.json` — install manually: `npm install nodemailer`
+- Password reset handler incomplete (no success response on reset)
+- No review/rating submission API (rating field exists on User model)
+- No payment gateway integration
+- No notifications or real-time updates
+- No logout endpoint (client-side token removal)
 - No automated tests
-- No reviews, notifications, payment processing, or real-time updates
-- Logout endpoint not implemented (client-side token removal only)
 
 ---
 
 ## Future Improvements
 
-- [ ] Wire `PATCH /requests/:requestId/accept` route
-- [ ] Complete password reset flow with JWT response and `passwordChangedAt`
-- [ ] Add `nodemailer` to dependencies
-- [ ] Extract middleware to dedicated folder
-- [ ] Global error handler and `AppError` class
-- [ ] Input validation with Joi
-- [ ] Protect service creation with admin role
-- [ ] Reviews and ratings system
+- [ ] Complete password reset flow with JWT response
+- [ ] Review and rating system after job completion
 - [ ] Payment gateway integration
-- [ ] Real-time request updates (WebSocket/Socket.IO)
-- [ ] Automated tests (Jest/Supertest)
+- [ ] Real-time request updates (WebSocket)
+- [ ] Global error handler and middleware folder refactor
+- [ ] Protect service creation with admin role
+- [ ] Request ownership authorization on GET
+- [ ] Automated tests (Jest + Supertest)
 - [ ] Rate limiting and Helmet security headers
-- [ ] Seed script for services and test users
+- [ ] Add `"seed": "node seed.js"` npm script
 
 ---
 

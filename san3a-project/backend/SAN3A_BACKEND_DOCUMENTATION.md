@@ -1,7 +1,7 @@
 # San3a Backend — Complete Technical Documentation
 
 > **Generated from source code analysis** of the `backend/` directory.  
-> All statements reflect the actual implementation as of the current codebase. Features not present in code are marked **Not implemented**.
+> All statements reflect the actual implementation. Features not present in code are marked **Not implemented**.
 
 ---
 
@@ -32,59 +32,63 @@
 
 ## What is San3a?
 
-**San3a** (Arabic: **صنعة**) is a home-services marketplace backend built with Node.js and Express. Based on the frontend copy and service catalog references, the platform connects **homeowners (customers)** with **professional craftsmen** for services such as:
+**San3a** (Arabic: **صنعة**) is a Node.js REST API for a home-services marketplace. It connects **customers** (homeowners) with **craftsmen** (service professionals) for jobs such as:
 
+- Cleaning (نظافة)
+- Air conditioning (تكييف)
 - Plumbing (سباكة)
 - Electrical work (كهرباء)
-- Air conditioning repair (تصليح تكييف)
-- Cleaning (تنظيف)
 
-The backend exposes a REST API under `/api/v1/` for user authentication, service catalog management, and service **request** (order) lifecycle management including geospatial craftsman discovery.
+The platform handles user registration, JWT authentication, service catalog management, geospatial craftsman discovery, **weighted match scoring**, request lifecycle management, and craftsman response-time tracking.
 
 ## Problem It Solves
 
-The platform addresses the difficulty of quickly finding **available, nearby, trusted craftsmen** when a customer needs urgent or scheduled home maintenance. Instead of manual phone calls or unstructured referrals, San3a:
+Finding a **nearby, available, reliable craftsman** quickly — especially for urgent home repairs — is difficult through informal channels. San3a centralizes this by:
 
-1. Lets customers register and submit structured service requests with location and notes.
-2. Calculates pricing (base fee + optional emergency fee).
-3. Finds nearby available craftsmen using MongoDB geospatial queries.
-4. Allows craftsmen to accept and progress requests through defined statuses.
+1. Letting customers submit structured service requests with location and notes.
+2. Finding nearby available craftsmen using MongoDB geospatial queries.
+3. Ranking craftsmen with a **multi-factor match score** (distance, rating, response speed, prior history).
+4. Tracking craftsman accept/reject responses to improve future matching.
+5. Managing the full request lifecycle from matching through completion.
 
 ## Main Idea
 
-San3a acts as a **matching layer** between customers and craftsmen:
+San3a is a **smart matching platform** between customers and craftsmen:
 
 ```
 Customer creates Request (PENDING_MATCHING)
         ↓
-System finds nearby available Craftsmen (geospatial query)
+System finds nearby craftsmen + computes match scores
         ↓
-Craftsman accepts Request (ACCEPTED) — becomes unavailable
+Craftsmen see offers (tracked in matchingPool)
         ↓
-Craftsman updates status (ARRIVED → IN_PROGRESS → COMPLETED)
+Craftsman accepts (ACCEPTED) or rejects (response time recorded)
         ↓
-Craftsman becomes available again after completion
+Craftsman progresses status → COMPLETED
+        ↓
+Craftsman becomes available again
 ```
 
 ## User Roles and Responsibilities
 
-| Role | Enum Value | Responsibilities (from code) |
-|------|------------|------------------------------|
-| **Customer** | `customer` | Register/login; create service requests; view request details; find nearby craftsmen for a request. Default role on signup. |
-| **Craftsman** | `craftsman` | Register/login with craftsman role; accept pending requests; update request status; complete requests; has `location`, `isAvailable` fields used in matching. |
-| **Admin** | `admin` | Access to protected test route `/admin-dashboard` via `restrictTo('admin')`. No admin CRUD or management APIs implemented beyond this placeholder route. |
+| Role | Enum | Responsibilities (from code) |
+|------|------|------------------------------|
+| **Customer** | `customer` | Register/login; create service requests; view requests; trigger nearby search and match results. Default role on signup. |
+| **Craftsman** | `craftsman` | Register with craftsman role; accept or reject offered requests; update request status; complete requests; has `location`, `isAvailable`, `rating`, and `avgResponseTimeSeconds` used in matching. |
+| **Admin** | `admin` | Access placeholder route `/admin-dashboard` via `restrictTo('admin')`. No admin management APIs beyond this test route. |
 
 ## Overall Business Logic
 
-1. **Services** are predefined catalog entries (`Service` model) with Arabic/English names, slug, and icon.
-2. **Requests** link a `client` (User), optional `craftsman` (User), and a `service` (Service).
-3. New requests start with status `PENDING_MATCHING` and `craftsman: null`.
-4. Pricing is computed server-side in `createRequest`: `baseFee = 120`, `emergencyFee = 30` if immediate scheduling, `totalAmount = baseFee + emergencyFee`.
-5. Nearby craftsmen are queried from the `User` collection where `role: 'craftsman'` and `isAvailable: true`, sorted by proximity within 10 km.
-6. When a craftsman accepts, they are assigned to the request and marked `isAvailable: false`.
-7. On completion, craftsman is set back to `isAvailable: true`.
+1. **Services** are catalog entries (`Service` model) seeded via `seed.js` or created via API.
+2. **Requests** link `client` (User), optional `craftsman` (User), and `service` (Service).
+3. New requests start as `PENDING_MATCHING` with `craftsman: null`.
+4. **Pricing** is computed in `createRequest`: `baseFee = 120`, `emergencyFee = 30` for immediate requests, `totalAmount = baseFee + emergencyFee`.
+5. **Nearby search** (`findNearbyCraftsmen`) uses `$geoNear` aggregation, default radius **5 km** (override via `?radius=` in meters). Results are added to `matchingPool`.
+6. **Match scoring** (`getMatchResults`) ranks craftsmen using weighted formula: 40% distance, 30% rating, 20% response time, 10% prior history with same client.
+7. **Accept/reject** updates `matchingPool` entries and calls `User.recordResponseTime()` to maintain a running average.
+8. On accept, craftsman is assigned and `isAvailable = false`. On complete, `isAvailable = true`.
 
-**Not implemented in backend:** reviews/ratings, notifications, real-time updates (Socket.IO removed), payment gateway processing, admin panel APIs, request listing endpoints, cancellation workflow logic beyond status enum value.
+**Not implemented:** Review submission API (rating field exists on User but no endpoint updates it), notifications, payment gateway, real-time WebSocket updates, logout endpoint, refresh tokens.
 
 ---
 
@@ -92,66 +96,69 @@ Craftsman becomes available again after completion
 
 ## Backend Architecture
 
-San3a uses a **layered MVC-style** Express application:
-
 ```
-server.js          → Process entry, env loading, MongoDB connection, HTTP listen
-app.js             → Express app setup, global middleware, route mounting
-src/routes/        → HTTP route definitions
-src/controllers/   → Request handlers (business logic lives here — no separate service layer)
-src/models/        → Mongoose schemas and model methods
-src/utils/         → Shared utilities (email sender)
+server.js          → Entry: dotenv, MongoDB connection, HTTP listen
+app.js             → Express setup, CORS, body parsing, route mounting
+seed.js            → Standalone script to seed Service catalog
+Dockerfile         → Multi-stage production container image
+docker-compose.yml → Local MongoDB + backend orchestration
+src/
+  routes/          → HTTP route definitions
+  controllers/     → Request handlers (business logic inline)
+  models/          → Mongoose schemas, hooks, instance methods
+  utils/           → Email sender utility
 ```
 
-There is **no separate service layer**, **no dedicated middleware folder**, and **no config module**. Authentication middleware (`protect`, `restrictTo`) is exported from `authController.js` and applied directly in route files.
+There is **no separate service layer**, **no middleware folder**, and **no config module**. Auth middleware lives in `authController.js`.
 
 ## Folder Structure
 
 ```
 backend/
-├── server.js                 # Entry point: dotenv, MongoDB, listen
-├── app.js                    # Express app configuration
-├── package.json              # Dependencies and npm scripts
-├── .env.example              # Environment variable template
-├── src/
-│   ├── controllers/
-│   │   ├── authController.js     # Auth, JWT, protect, restrictTo, password reset
-│   │   ├── requestController.js  # Request CRUD, matching, status updates
-│   │   └── serviceController.js  # Service catalog endpoints
-│   ├── models/
-│   │   ├── userModel.js          # User schema, password hooks, geo index
-│   │   ├── requestModel.js       # Request/order schema
-│   │   └── serviceModel.js       # Service catalog schema
-│   ├── routes/
-│   │   ├── userRoutes.js         # /api/v1/users/*
-│   │   ├── requestRoutes.js      # /api/v1/requests/*
-│   │   └── serviceRoutes.js      # /api/v1/services/*
-│   └── utils/
-│       └── email.js              # Nodemailer wrapper for password reset emails
-└── node_modules/
+├── server.js
+├── app.js
+├── seed.js
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
+├── package.json
+├── .env.example
+├── SAN3A_BACKEND_DOCUMENTATION.md
+├── README.md
+└── src/
+    ├── controllers/
+    │   ├── authController.js
+    │   ├── requestController.js
+    │   └── serviceController.js
+    ├── models/
+    │   ├── userModel.js
+    │   ├── requestModel.js
+    │   └── serviceModel.js
+    ├── routes/
+    │   ├── userRoutes.js
+    │   ├── requestRoutes.js
+    │   └── serviceRoutes.js
+    └── utils/
+        └── email.js
 ```
 
 ### Folder Purposes
 
 | Folder | Exists? | Purpose |
 |--------|---------|---------|
-| `controllers/` | ✅ | Handle HTTP requests, call Mongoose models, return JSON responses |
-| `models/` | ✅ | Define MongoDB schemas, validations, indexes, instance methods |
-| `routes/` | ✅ | Map URLs and HTTP methods to controller functions/middleware |
-| `middleware/` | ❌ **Not implemented** | Auth middleware lives inside `authController.js` instead |
-| `utils/` | ✅ | Contains `email.js` for sending emails |
-| `services/` | ❌ **Not implemented** | Business logic is inline in controllers |
-| `config/` | ❌ **Not implemented** | Configuration via `process.env` and inline in `server.js`/`app.js` |
-| `validators/` | ❌ **Not implemented** | Validation via Mongoose schema validators and manual checks in controllers |
-| `helpers/` | ❌ **Not implemented** | — |
+| `controllers/` | ✅ | HTTP handlers; business logic, geospatial aggregation, match scoring |
+| `models/` | ✅ | Mongoose schemas, validations, indexes, hooks, instance methods |
+| `routes/` | ✅ | URL → controller mapping and middleware application |
+| `utils/` | ✅ | `sendEmail()` via Nodemailer |
+| `middleware/` | ❌ Not implemented | `protect` / `restrictTo` in `authController.js` |
+| `services/` | ❌ Not implemented | Logic inline in controllers |
+| `config/` | ❌ Not implemented | Env vars read directly via `process.env` |
+| `validators/` | ❌ Not implemented | Mongoose schema + manual controller checks |
+| `helpers/` | ❌ Not implemented | Helper functions inline (e.g. `normalize()` in `requestController.js`) |
 
 ## Why This Architecture Was Chosen
 
-The structure follows a **minimal Express + Mongoose** pattern suitable for a graduation/MVP project:
-
-- Fast to develop with clear separation between routes, controllers, and models.
-- No extra abstraction layers — logic is easy to trace for learning purposes.
-- Mongoose handles schema validation at the database layer.
+Minimal **Express + Mongoose MVC** suitable for an MVP/graduation project: fast development, easy tracing, schema-level validation, with recent additions (Docker, seed script, match algorithm) kept in controllers for simplicity.
 
 ## Module Interaction
 
@@ -171,6 +178,7 @@ flowchart LR
     requestController --> requestModel
     requestController --> userModel
     serviceController --> serviceModel
+    seed.js --> serviceModel
     userModel --> MongoDB[(MongoDB)]
     requestModel --> MongoDB
     serviceModel --> MongoDB
@@ -180,82 +188,94 @@ flowchart LR
 
 # 3. Technology Stack
 
-## Packages Actually Used in Source Code
+## Packages Used in Source Code
 
 | Technology | What It Is | Why Used | How Used in San3a |
 |------------|-----------|----------|-------------------|
-| **Node.js** | JavaScript runtime | Run server-side JavaScript | Entry via `server.js`; `engines.node >= 16` in `package.json` |
-| **Express** (`^5.2.1`) | Web framework | HTTP routing and middleware | `app.js` creates app; routes mounted at `/api/v1/*` |
-| **MongoDB** | Document database | Store users, services, requests | Connected in `server.js` via Mongoose |
-| **Mongoose** (`^9.6.3`) | MongoDB ODM | Schema definition, validation, queries | All models in `src/models/` |
-| **dotenv** | Env loader | Load secrets from `.env` | `dotenv.config({ path: './.env' })` in `server.js` |
-| **jsonwebtoken** | JWT library | Stateless authentication | `signToken()` and `jwt.verify()` in `authController.js` |
-| **bcryptjs** | Password hashing | Secure password storage | `userModel.js` pre-save hook (12 rounds) and `correctPassword()` |
-| **validator** | String validation | Email format validation | `validator.isEmail` on `User.email` |
-| **crypto** (Node built-in) | Cryptographic utilities | Reset token generation/hashing | `createPasswordResetToken()` and `resetPassword()` |
-| **cors** | CORS middleware | Allow frontend cross-origin requests | `app.js` with `FRONTEND_URL` origin |
-| **nodemailer** | Email sending | Password reset emails | `src/utils/email.js` — **⚠️ used in code but NOT listed in `package.json` dependencies** |
+| **Node.js** | JS runtime | Server-side execution | `server.js`, `engines.node >= 16` |
+| **Express** `^5.2.1` | Web framework | HTTP routing/middleware | `app.js`, route mounting at `/api/v1/*` |
+| **MongoDB** | Document DB | Persistent storage | Connected in `server.js` |
+| **Mongoose** `^9.6.3` | MongoDB ODM | Schemas, validation, queries | All models in `src/models/` |
+| **dotenv** | Env loader | Secret/config management | `server.js`, `seed.js` |
+| **jsonwebtoken** | JWT library | Stateless auth | `signToken()`, `jwt.verify()` in `authController.js` |
+| **bcryptjs** | Password hashing | Secure storage | `userModel.js` pre-save (12 rounds), `correctPassword()` |
+| **validator** | String validation | Email format | `validator.isEmail` on User.email |
+| **crypto** (built-in) | Cryptography | Reset token generation/hashing | `createPasswordResetToken()`, `resetPassword()` |
+| **cors** | CORS middleware | Frontend cross-origin | `app.js` with `FRONTEND_URL` |
+| **nodemailer** `^6.10.1` | Email sending | Password reset emails | `src/utils/email.js` |
+| **Geospatial Queries** | MongoDB feature | Nearby craftsman search | `$geoNear` aggregation in `requestController.js` |
 
 ## Packages in `package.json` But Not Used in Source
 
 | Package | Status |
 |---------|--------|
-| **bcrypt** (`^6.0.0`) | Listed in dependencies; **`bcryptjs` is used instead** in `userModel.js` |
-| **socket.io** | Was in `package-lock.json`; **removed from `package.json`** per `PERFORMANCE_GUIDE.md`; **not used in any source file** |
+| **bcrypt** `^6.0.0` | Listed; **`bcryptjs` is used** in `userModel.js` |
 
-## Technologies Mentioned in Requirements But Not Implemented
+## Technologies Not Implemented
 
 | Technology | Status |
 |------------|--------|
-| **Joi** | Not implemented — no Joi schemas or dependency |
-| **Multer** | Not implemented — no file upload handling |
-| **Cloudinary** | Not implemented — `User.avatar` is a string defaulting to `'default.png'` with no upload logic |
-| **Socket.IO** | Not implemented in current source (removed from active dependencies) |
+| **Joi** | Not implemented |
+| **Multer** | Not implemented — no file uploads |
+| **Cloudinary** | Not implemented — `avatar` is a string default |
+| **Socket.IO** | Not implemented |
 | **Helmet** | Not implemented |
 | **Rate limiting** | Not implemented |
-| **cookie-parser** | Not implemented — `protect` checks `req.cookies.user_token` but cookies are never parsed |
-| **Nodemailer** | Code exists but package not declared in `package.json` |
+| **cookie-parser** | Not implemented — `protect` checks cookies but they are never parsed |
 
 ## Dev Dependencies
 
 | Package | Purpose |
 |---------|---------|
-| **nodemon** | Auto-restart during development (`npm run dev`) |
+| **nodemon** | Auto-restart in development (`npm run dev`) |
+
+## Docker
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Multi-stage Node 20 Alpine image, non-root user, dumb-init |
+| `docker-compose.yml` | MongoDB 7.0 + backend with health checks |
+| `.dockerignore` | Excludes node_modules, .env, docs from image |
 
 ---
 
 # 4. Database Documentation
 
-San3a uses **3 Mongoose collections**: `User`, `Service`, `Request`.
+Three Mongoose collections: **User**, **Service**, **Request**.
 
 ---
 
 ## 4.1 User Model
 
 **File:** `src/models/userModel.js`  
-**Collection:** `users`  
-**Purpose:** Stores all platform users (customers, craftsmen, admins) with authentication fields and craftsman geolocation.
+**Collection:** `users`
+
+### Purpose
+
+Stores customers, craftsmen, and admins with authentication, geolocation, availability, rating, and response-time metrics.
 
 ### Fields
 
 | Field | Type | Required | Default | Validation / Notes |
 |-------|------|----------|---------|-------------------|
-| `name` | String | Yes | — | Arabic error message on missing |
-| `email` | String | Yes | — | `unique`, `lowercase`, `validator.isEmail` |
-| `phone` | String | Yes | — | `unique` |
-| `password` | String | Yes | — | `minlength: 8`, `select: false` (excluded from queries by default) |
-| `role` | String | No | `'customer'` | `enum: ['customer', 'craftsman', 'admin']` |
+| `name` | String | Yes | — | Arabic error message |
+| `email` | String | Yes | — | unique, lowercase, `validator.isEmail` |
+| `phone` | String | Yes | — | unique |
+| `password` | String | Yes | — | minlength 8, `select: false` |
+| `role` | String | No | `'customer'` | enum: customer, craftsman, admin |
 | `avatar` | String | No | `'default.png'` | No upload logic |
-| `location.type` | String | No | `'Point'` | `enum: ['Point']` — GeoJSON Point type |
-| `location.coordinates` | `[Number]` | No | `[31.2357, 30.0444]` | `[longitude, latitude]` — defaults to Cairo area |
-| `location.address` | String | No | — | Optional text address |
-| `isAvailable` | Boolean | No | `true` | Used for craftsman matching |
-| `passwordChangedAt` | Date | No | — | Used by `changePasswordAfter()` for JWT invalidation |
-| `isActive` | Boolean | No | `true` | `select: false`; checked in `protect` middleware |
-| `passwordResetToken` | String | No | — | Stores **SHA-256 hash** of reset token |
-| `passwordResetExpires` | Date | No | — | Token expiry (10 minutes from creation) |
-| `createdAt` | Date | Auto | — | From `timestamps: true` |
-| `updatedAt` | Date | Auto | — | From `timestamps: true` |
+| `location.type` | String | No | `'Point'` | enum: ['Point'] |
+| `location.coordinates` | [Number] | No | `[31.2357, 30.0444]` | [longitude, latitude] |
+| `location.address` | String | No | — | Optional |
+| `isAvailable` | Boolean | No | `true` | Craftsman availability for matching |
+| `rating` | Number | No | `4.5` | min 1, max 5 — used in match scoring |
+| `avgResponseTimeSeconds` | Number | No | `null` | Running average; null = insufficient data |
+| `responseCount` | Number | No | `0` | Number of accept/reject responses recorded |
+| `passwordChangedAt` | Date | No | — | JWT invalidation after password change |
+| `isActive` | Boolean | No | `true` | `select: false`; checked in protect |
+| `passwordResetToken` | String | No | — | SHA-256 hash of reset token |
+| `passwordResetExpires` | Date | No | — | 10-minute expiry |
+| `createdAt`, `updatedAt` | Date | Auto | — | timestamps |
 
 ### Indexes
 
@@ -263,61 +283,56 @@ San3a uses **3 Mongoose collections**: `User`, `Service`, `Request`.
 userSchema.index({ location: '2dsphere' });
 ```
 
-Enables `$near` geospatial queries on craftsman locations.
-
 ### References
 
-- Referenced by `Request.client` and `Request.craftsman`.
+- Referenced by `Request.client`, `Request.craftsman`, `Request.matchingPool[].craftsman`
 
-### Middleware / Hooks
+### Hooks
 
-**`pre('save')`** — Password hashing:
-- Runs only if `password` is modified.
-- Hashes with `bcrypt.hash(this.password, 12)`.
-- Note: `.env.example` defines `BCRYPT_ROUNDS=10` but code hardcodes **12**.
+**`pre('save')`** — Hashes password with bcryptjs (12 rounds) when modified.
 
 ### Instance Methods
 
 | Method | Purpose |
 |--------|---------|
-| `correctPassword(candidatePassword, userPassword)` | Compares plain password with bcrypt hash |
-| `changePasswordAfter(JWTTimestamp)` | Returns `true` if JWT was issued before `passwordChangedAt` |
-| `createPasswordResetToken()` | Generates random token, stores SHA-256 hash + 10 min expiry, returns plain token |
+| `correctPassword(candidate, hash)` | bcrypt.compare |
+| `changePasswordAfter(JWTTimestamp)` | Returns true if JWT issued before password change |
+| `createPasswordResetToken()` | Generates plain token, stores SHA-256 hash, 10 min expiry |
+| `recordResponseTime(responseSeconds)` | Updates running average of response time |
 
-### Static Methods
+### Static Methods / Virtuals
 
-**None defined.**
-
-### Virtual Fields
-
-**None defined.**
+**None.**
 
 ---
 
 ## 4.2 Service Model
 
 **File:** `src/models/serviceModel.js`  
-**Collection:** `services`  
-**Purpose:** Catalog of home service types displayed on the landing page and linked to requests.
+**Collection:** `services`
+
+### Purpose
+
+Catalog of home service types for the landing page and request creation.
 
 ### Fields
 
 | Field | Type | Required | Default | Validation |
 |-------|------|----------|---------|------------|
-| `nameAr` | String | Yes | — | `unique`, `trim` |
-| `nameEn` | String | Yes | — | `unique`, `trim` |
-| `slug` | String | Yes | — | `unique` |
-| `icon` | String | Yes | — | Icon identifier/path |
-| `isActive` | Boolean | No | `true` | Only active services returned by `getAllServices` |
-| `createdAt` / `updatedAt` | Date | Auto | — | `timestamps: true` |
+| `nameAr` | String | Yes | — | unique, trim |
+| `nameEn` | String | Yes | — | unique, trim |
+| `slug` | String | Yes | — | unique |
+| `icon` | String | Yes | — | Icon identifier |
+| `isActive` | Boolean | No | `true` | Filtered in getAllServices |
+| `createdAt`, `updatedAt` | Date | Auto | — | timestamps |
 
 ### Indexes
 
-No explicit indexes beyond unique field indexes created by Mongoose for `nameAr`, `nameEn`, `slug`.
+Unique indexes on `nameAr`, `nameEn`, `slug` (via schema unique constraints).
 
 ### References
 
-- Referenced by `Request.service`.
+Referenced by `Request.service`.
 
 ### Hooks / Methods / Virtuals
 
@@ -328,33 +343,44 @@ No explicit indexes beyond unique field indexes created by Mongoose for `nameAr`
 ## 4.3 Request Model
 
 **File:** `src/models/requestModel.js`  
-**Collection:** `requests`  
-**Purpose:** Represents a customer's service order from creation through completion.
+**Collection:** `requests`
+
+### Purpose
+
+Customer service order from creation through completion, including craftsman matching pool tracking.
 
 ### Fields
 
 | Field | Type | Required | Default | Validation |
 |-------|------|----------|---------|------------|
-| `client` | ObjectId → User | Yes | — | Customer who created the request |
-| `craftsman` | ObjectId → User | No | `null` | Assigned when craftsman accepts |
+| `client` | ObjectId → User | Yes | — | Customer |
+| `craftsman` | ObjectId → User | No | `null` | Assigned on accept |
 | `service` | ObjectId → Service | Yes | — | Service type |
-| `status` | String | No | `'PENDING_MATCHING'` | `enum: ['PENDING_MATCHING', 'ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']` |
-| `statusHistory` | Array of subdocs | No | — | `{ status, changeAt, note }` — see note below |
-| `arriveAt` | Date | No | — | Not populated by current controllers |
-| `startedAt` | Date | No | — | Not populated by current controllers |
-| `completedAt` | Date | No | — | Not populated by current controllers |
+| `status` | String | No | `PENDING_MATCHING` | enum: PENDING_MATCHING, ACCEPTED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED |
+| `statusHistory[]` | Subdocs | No | — | `{ status, changeAt, note }` |
+| `matchingPool[]` | Subdocs | No | — | See below |
+| `arriveAt` | Date | No | — | Not set by controllers |
+| `startedAt` | Date | No | — | Not set by controllers |
+| `completedAt` | Date | No | — | Not set by controllers |
 | `location.address` | String | Yes | — | Text address |
-| `location.coordinates` | `[Number]` | Yes | — | `[longitude, latitude]` — **not GeoJSON Point wrapper** |
-| `scheduledAt` | Date | No | `Date.now` | Request scheduling time |
+| `location.coordinates` | [Number] | Yes | — | [longitude, latitude] |
+| `scheduledAt` | Date | No | Date.now | Scheduling time |
 | `clientNotes` | String | No | — | Customer notes |
-| `pricing.baseFee` | Number | Yes | `0` | Set to 120 in controller |
-| `pricing.emergencyFee` | Number | No | `0` | Set to 30 for immediate requests |
-| `pricing.totalAmount` | Number | Yes | `0` | Sum of fees |
-| `paymentMethod` | String | No | `'CASH'` | `enum: ['CASH', 'CARD', 'VODAFONE_CASH']` |
-| `isPaid` | Boolean | No | `false` | No payment processing logic |
-| `createdAt` / `updatedAt` | Date | Auto | — | `timestamps: true` |
+| `pricing.baseFee` | Number | Yes | 0 | Set to 120 in controller |
+| `pricing.emergencyFee` | Number | No | 0 | 30 for immediate requests |
+| `pricing.totalAmount` | Number | Yes | 0 | Sum |
+| `paymentMethod` | String | No | `CASH` | CASH, CARD, VODAFONE_CASH |
+| `isPaid` | Boolean | No | `false` | No payment logic |
+| `createdAt`, `updatedAt` | Date | Auto | — | timestamps |
 
-**Schema inconsistency:** `statusHistory` subdocument field is `changeAt` in the schema, but controllers push `changedAt` — the timestamp may not persist as intended.
+### matchingPool Subdocument
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `craftsman` | ObjectId → User | — | Craftsman who saw the offer |
+| `offeredAt` | Date | Date.now | When offer was shown |
+| `respondedAt` | Date | null | When craftsman responded |
+| `response` | String | `PENDING` | PENDING, ACCEPTED, REJECTED, EXPIRED |
 
 ### Indexes
 
@@ -362,19 +388,15 @@ No explicit indexes beyond unique field indexes created by Mongoose for `nameAr`
 requestSchema.index({ "location.coordinates": "2dsphere" });
 ```
 
-**Note:** This indexes a raw coordinate array, not a GeoJSON `Point`. The geospatial query in `findNearbyCraftsmen` queries **User.location** (proper GeoJSON), not Request location. This index may not function as intended for request-based queries.
+Note: coordinates are not GeoJSON Point wrapper — index may not work for request-based geo queries. Matching uses User.location instead.
 
-### References
+### Schema Inconsistency
 
-| Field | References |
-|-------|------------|
-| `client` | `User` |
-| `craftsman` | `User` |
-| `service` | `Service` |
+Controllers push `changedAt` in statusHistory; schema field is `changeAt`.
 
 ### Hooks / Methods / Virtuals
 
-**None defined.**
+**None.**
 
 ---
 
@@ -383,12 +405,13 @@ requestSchema.index({ "location.coordinates": "2dsphere" });
 ```
 User (customer)
  ├─ creates many → Request (as client)
- └─ may be assigned to many → Request (as craftsman)
+ └─ may appear in many → Request.matchingPool
 
 User (craftsman)
- ├─ has one → location (GeoJSON Point)
- ├─ can be assigned to many → Request (as craftsman)
- └─ isAvailable toggled on accept/complete
+ ├─ has GeoJSON location (2dsphere index)
+ ├─ has rating, avgResponseTimeSeconds, isAvailable
+ ├─ assigned to many → Request (as craftsman)
+ └─ tracked in → Request.matchingPool
 
 Service
  └─ referenced by many → Request
@@ -396,787 +419,414 @@ Service
 Request
  ├─ belongs to one → User (client)
  ├─ optionally belongs to one → User (craftsman)
- └─ belongs to one → Service
+ ├─ belongs to one → Service
+ └─ tracks many → matchingPool entries (craftsman offers/responses)
 ```
 
 ---
 
 # 5. Authentication & Authorization Flow
 
-## Overview
-
-San3a uses **JWT (JSON Web Token)** bearer authentication. Tokens are signed with `JWT_SECRET` and expire in **90 days**. There is **no refresh token strategy** and **no logout endpoint** (client-side token removal only).
-
-## Signup Flow
+## Signup
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant API as POST /api/v1/users/signup
-    participant AC as authController.signup
-    participant UM as User Model
-    participant JWT as jsonwebtoken
+    participant API as POST /users/signup
+    participant M as User Model
 
     U->>API: { name, email, phone, password, role }
-    API->>AC: signup(req, res)
-    AC->>UM: User.create({ ... })
-    UM->>UM: pre-save: bcrypt hash password
-    UM-->>AC: newUser
-    AC->>JWT: sign({ id }, JWT_SECRET, { expiresIn: '90d' })
-    JWT-->>AC: token
-    AC-->>U: 201 { status, token, data: { user } }
+    API->>M: User.create()
+    M->>M: pre-save: bcrypt hash
+    API->>API: signToken(_id)
+    API-->>U: 201 { token, user }
 ```
 
-**Steps:**
-1. Client sends `POST /api/v1/users/signup` with user fields.
-2. `User.create()` validates schema and hashes password via pre-save hook.
-3. `signToken(newUser._id)` generates JWT.
-4. Password removed from response object.
-5. Returns `201` with token and user data.
-
-**No authentication required.** Any role can be passed in body (including `admin`) — **no server-side role restriction on signup**.
-
-## Login Flow
+## Login
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant API as POST /api/v1/users/login
-    participant AC as authController.login
-    participant UM as User Model
+    participant API as POST /users/login
 
     U->>API: { email, password }
-    API->>AC: login(req, res)
-    AC->>AC: Validate email & password present
-    AC->>UM: findOne({ email }).select('+password')
-    AC->>UM: correctPassword(password, hash)
-    alt Invalid credentials
-        AC-->>U: 401 { status: 'fail', message }
+    API->>API: findOne email + correctPassword
+    alt Invalid
+        API-->>U: 401
     end
-    AC->>AC: signToken(user._id)
-    AC-->>U: 200 { status, token, data: { user } }
+    API-->>U: 200 { token, user }
 ```
 
-## Logout Flow
+## Logout
 
-**Not implemented** on the backend. The frontend clears `localStorage` tokens client-side.
+**Not implemented.** Client removes token from storage.
 
 ## JWT Generation
 
 ```javascript
-// src/controllers/authController.js
-const signToken = id => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '90d'
-  });
-};
+// authController.js
+jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '90d' });
 ```
 
-Payload contains only `{ id: userId }`. No role embedded in token.
+## JWT Verification — `protect`
 
-## JWT Verification (`protect`)
+1. Extract token from `Authorization: Bearer` header OR `req.cookies.user_token`
+2. `jwt.verify(token, JWT_SECRET)`
+3. Load user with `select('+isActive')`
+4. Reject if missing/inactive
+5. Check `changePasswordAfter(decoded.iat)`
+6. Set `req.user`, call `next()`
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant P as protect middleware
-    participant JWT as jwt.verify
-    participant UM as User Model
+## `restrictTo(...roles)`
 
-    C->>P: Authorization: Bearer <token>
-    P->>P: Extract token from header or req.cookies.user_token
-    alt No token
-        P-->>C: 401 Not logged in
-    end
-    P->>JWT: verify(token, JWT_SECRET)
-    alt Invalid/expired
-        P-->>C: 401 Invalid token
-    end
-    P->>UM: findById(decoded.id).select('+isActive')
-    alt User missing or inactive
-        P-->>C: 401 User no longer exists
-    end
-    P->>UM: changePasswordAfter(decoded.iat)
-    alt Password changed after token issued
-        P-->>C: 401 Please log in again
-    end
-    P->>P: req.user = currentUser
-    P->>C: next()
-```
-
-**Token sources (in order):**
-1. `Authorization: Bearer <token>` header
-2. `req.cookies.user_token` cookie — **requires cookie-parser (Not implemented)**
-
-## `restrictTo` Middleware
-
-Factory function returning middleware that checks `req.user.role` against allowed roles:
-
-```javascript
-exports.restrictTo = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ status: 'fail', message: "you don't have permission..." });
-    }
-    next();
-  };
-};
-```
-
-Must run **after** `protect`.
+Checks `req.user.role` against allowed roles; returns 403 if not allowed. Must run after `protect`.
 
 ## Password Hashing
 
-- Library: **bcryptjs**
-- Rounds: **12** (hardcoded in `userModel.js`)
-- Triggered on `pre('save')` when password is modified
-
-## Password Comparison
-
-`user.correctPassword(candidatePassword, userPassword)` uses `bcrypt.compare()`.
-
-## `passwordChangedAt` Logic
-
-`changePasswordAfter(JWTTimestamp)` compares JWT `iat` (issued-at, seconds) with `passwordChangedAt` (converted to seconds). Returns `true` if token was issued before password change.
-
-**Note:** `resetPassword` does **not** set `passwordChangedAt` after password update — this logic is incomplete.
+bcryptjs, 12 rounds (hardcoded). `BCRYPT_ROUNDS` in `.env.example` is **not used**.
 
 ## Token Expiration
 
-- JWT expires in **90 days**
-- No refresh token or silent renewal
+90 days. **No refresh token strategy.**
 
-## Refresh Strategy
-
-**Not implemented.**
-
-## Security Considerations (Current State)
+## Security Considerations
 
 | Aspect | Status |
 |--------|--------|
-| Password hashing | ✅ Implemented |
-| JWT secret from env | ✅ Required at runtime |
-| Token in Authorization header | ✅ Supported |
-| Cookie-based auth | ⚠️ Referenced but cookie-parser not installed |
-| Role in JWT payload | ❌ Not included — role fetched from DB on each request via protect |
-| Admin signup restriction | ❌ Not enforced |
-| Rate limiting on auth endpoints | ❌ Not implemented |
+| Password hashing | ✅ |
+| JWT from env | ✅ |
+| Role in JWT | ❌ Fetched from DB each request |
+| Admin signup restriction | ❌ |
+| Cookie auth | ⚠️ Referenced but cookie-parser not installed |
+| Token logged to console | ⚠️ In protect middleware |
 
 ---
 
 # 6. Password Reset Flow
 
-## Overview
+## Forgot Password — `POST /api/v1/users/forgotPassword`
 
-Partially implemented in `authController.js` (`forgotPassword`, `resetPassword`) and `userModel.createPasswordResetToken()`.
+1. Find user by email → 404 if missing
+2. `createPasswordResetToken()` — plain token returned, SHA-256 hash stored, 10 min expiry
+3. Save user with `validateBeforeSave: false`
+4. Build reset URL: `{protocol}://{host}/api/v1/users/resetPassword/{plainToken}`
+5. Send email via Nodemailer
+6. On email failure: clear reset fields, return 500
 
-## Forgot Password
+### Why Crypto
 
-**Endpoint:** `POST /api/v1/users/forgotPassword`
+- `randomBytes(32)` — unpredictable token
+- SHA-256 hash in DB — DB leak does not expose usable tokens
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant API as forgotPassword
-    participant UM as User Model
-    participant EM as sendEmail
+## Reset Password — `POST /api/v1/users/resetPassword/:token`
 
-    U->>API: { email }
-    API->>UM: findOne({ email })
-    alt User not found
-        API-->>U: 404
-    end
-    API->>UM: createPasswordResetToken()
-    Note over UM: Plain token returned<br/>SHA-256 hash stored in DB<br/>Expires in 10 minutes
-    API->>UM: save({ validateBeforeSave: false })
-    API->>EM: sendEmail({ email, subject, message with resetURL })
-    alt Email fails
-        API->>UM: Clear reset fields, save
-        API-->>U: 500
-    end
-    API-->>U: 200 { status: 'success', message: 'تم إرسال الإيميل' }
-```
+1. Hash `req.params.token` with SHA-256
+2. Find user where hash matches and not expired
+3. Set `user.password = req.body.password`
+4. Clear reset token fields
+5. `user.save()`
 
-### Reset Token Generation
+### Incomplete Implementation
 
-1. `crypto.randomBytes(32).toString('hex')` → **plain token** (sent to user)
-2. `crypto.createHash('sha256').update(resetToken).digest('hex')` → **hashed token** (stored in DB)
-
-### Why Crypto Is Used
-
-- `randomBytes` provides cryptographically secure randomness for unpredictable tokens.
-- SHA-256 hashing ensures that if the database is compromised, plain reset tokens are not exposed.
-
-### Original vs Hashed Token
-
-| Token | Where | Purpose |
-|-------|-------|---------|
-| Plain | Email link URL | User presents this to reset endpoint |
-| Hashed (SHA-256) | `passwordResetToken` in DB | Compared on reset |
-
-### Token Expiration
-
-`passwordResetExpires = Date.now() + 10 * 60 * 1000` (10 minutes)
-
-### Reset URL Format
-
-```
-{protocol}://{host}/api/v1/users/resetPassword/{plainToken}
-```
-
-Built dynamically from the incoming request host.
-
-## Reset Password
-
-**Endpoint:** `POST /api/v1/users/resetPassword/:token`
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant API as resetPassword
-    participant UM as User Model
-
-    U->>API: POST /resetPassword/:token { password, passwordConfrim }
-    API->>API: SHA-256 hash req.params.token
-    API->>UM: findOne({ passwordResetToken: hash, passwordResetExpires: { $gt: now } })
-    alt Invalid/expired
-        API-->>U: 400
-    end
-    API->>UM: user.password = req.body.password
-    API->>UM: Clear reset token fields
-    API->>UM: save()
-    Note over API: ⚠️ No response sent<br/>⚠️ passwordChangedAt not set<br/>⚠️ No JWT returned<br/>⚠️ passwordConfrim typo, not in schema
-```
-
-### Incomplete Implementation Notes
-
-The `resetPassword` function ends after `user.save()` with comments indicating planned steps (update `passwordChangedAt`, log user in, send JWT) — **these are not implemented**. The handler does not send any HTTP response on success, which will cause the client to hang.
-
-### Security Rationale
-
-| Step | Why |
-|------|-----|
-| Hash token in DB | DB leak does not expose usable reset links |
-| Short expiry (10 min) | Limits attack window |
-| Clear tokens on email failure | Prevents orphaned valid tokens |
-| Clear tokens after use | Prevents token reuse |
+- Does **not** set `passwordChangedAt`
+- Does **not** return JWT or HTTP response on success (handler ends without `res.json`)
+- References `passwordConfrim` (typo) — field not in schema
 
 ---
 
 # 7. API Documentation
 
-**Base URL:** `http://localhost:{PORT}/api/v1` (default port `5000`)
-
-**Standard success response shape:**
-```json
-{
-  "status": "success",
-  "data": { ... },
-  "token": "..." // auth endpoints only
-}
-```
-
-**Standard error response shape:**
-```json
-{
-  "status": "fail" | "error",
-  "message": "...",
-  "error": "..." // sometimes included
-}
-```
+**Base URL:** `http://localhost:5000/api/v1`
 
 ---
 
-## Health Check
-
-### GET `/`
+## GET `/`
 
 | Property | Value |
 |----------|-------|
-| **Method** | GET |
-| **Path** | `/` |
-| **Purpose** | Simple server health check |
-| **Authentication** | No |
-| **Roles** | Any |
-
-**Example Response (200):**
-```
-server is working ....
-```
-(Plain text, not JSON)
+| Purpose | Health check |
+| Auth | No |
+| Response | Plain text: `server is working ....` |
 
 ---
 
-## User Routes — `/api/v1/users`
-
----
-
-### Signup
+## POST `/api/v1/users/signup`
 
 | Property | Value |
 |----------|-------|
-| **Method** | POST |
-| **Path** | `/api/v1/users/signup` |
-| **Purpose** | Register a new user account |
-| **Authentication** | No |
-| **Roles** | Any (role passed in body) |
+| Purpose | Register new user |
+| Auth | No |
+| Roles | Any (role in body) |
 
-**Request Body:**
+**Body:** `{ name, email, phone, password, role? }`
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | string | Yes |
-| `email` | string | Yes |
-| `phone` | string | Yes |
-| `password` | string | Yes (min 8 chars) |
-| `role` | string | No (`customer` \| `craftsman` \| `admin`) |
+**Success:** `201` — `{ status, token, data: { user } }`
 
-**Example Request:**
-```json
-{
-  "name": "Ahmed Ali",
-  "email": "ahmed@example.com",
-  "phone": "01012345678",
-  "password": "password123",
-  "role": "customer"
-}
-```
+**Errors:** `400` validation/duplicate
 
-**Example Response (201):**
-```json
-{
-  "status": "success",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "data": {
-    "user": {
-      "_id": "...",
-      "name": "Ahmed Ali",
-      "email": "ahmed@example.com",
-      "phone": "01012345678",
-      "role": "customer",
-      "avatar": "default.png",
-      "location": { "type": "Point", "coordinates": [31.2357, 30.0444] },
-      "isAvailable": true
-    }
-  }
-}
-```
-
-**Success Status:** `201`
-
-**Possible Errors:**
-
-| Code | Condition |
-|------|-----------|
-| `400` | Duplicate email/phone, validation failure |
-
-**Related:** `authController.signup`, `User` model
-
-**Internal Flow:**
-1. `User.create()` with body fields
-2. Pre-save hook hashes password
-3. JWT signed with user `_id`
-4. Password stripped from response
+**Flow:** User.create → hash password → signToken → return
 
 ---
 
-### Login
+## POST `/api/v1/users/login`
 
 | Property | Value |
 |----------|-------|
-| **Method** | POST |
-| **Path** | `/api/v1/users/login` |
-| **Purpose** | Authenticate and receive JWT |
-| **Authentication** | No |
+| Purpose | Authenticate |
+| Auth | No |
 
-**Request Body:**
+**Body:** `{ email, password }`
 
-| Field | Type | Required |
-|-------|------|----------|
-| `email` | string | Yes |
-| `password` | string | Yes |
+**Success:** `200` — `{ status, token, data: { user } }`
 
-**Example Response (200):**
-```json
-{
-  "status": "success",
-  "token": "eyJhbGci...",
-  "data": { "user": { ... } }
-}
-```
-
-**Possible Errors:**
-
-| Code | Condition |
-|------|-----------|
-| `400` | Missing email or password |
-| `401` | Invalid credentials |
-| `500` | Server error |
-
-**Related:** `authController.login`, `User.correctPassword`
+**Errors:** `400` missing fields, `401` invalid credentials, `500` server error
 
 ---
 
-### Forgot Password
+## POST `/api/v1/users/forgotPassword`
 
 | Property | Value |
 |----------|-------|
-| **Method** | POST |
-| **Path** | `/api/v1/users/forgotPassword` |
-| **Purpose** | Send password reset email |
-| **Authentication** | No |
+| Purpose | Send reset email |
+| Auth | No |
 
-**Request Body:** `{ "email": "user@example.com" }`
+**Body:** `{ email }`
 
-**Example Response (200):**
-```json
-{
-  "status": "success",
-  "message": "تم إرسال الإيميل"
-}
-```
+**Success:** `200` — `{ status: 'success', message: 'تم إرسال الإيميل' }`
 
-**Possible Errors:**
-
-| Code | Condition |
-|------|-----------|
-| `404` | Email not found |
-| `500` | Email send failure |
-
-**Related:** `authController.forgotPassword`, `User.createPasswordResetToken`, `utils/email.js`
-
-**Note:** Requires `nodemailer` (not in `package.json`) and email env vars.
+**Errors:** `404` user not found, `500` email failure
 
 ---
 
-### Reset Password
+## POST `/api/v1/users/resetPassword/:token`
 
 | Property | Value |
 |----------|-------|
-| **Method** | POST |
-| **Path** | `/api/v1/users/resetPassword/:token` |
-| **Purpose** | Set new password using reset token |
-| **Authentication** | No (token in URL) |
+| Purpose | Reset password |
+| Auth | No (token in URL) |
 
-**Params:** `token` — plain reset token from email
+**Params:** `token` — plain reset token
 
-**Request Body:**
+**Body:** `{ password, passwordConfrim? }`
 
-| Field | Type |
-|-------|------|
-| `password` | string |
-| `passwordConfrim` | string (typo in code; not validated) |
+**Errors:** `400` invalid/expired token
 
-**Possible Errors:**
-
-| Code | Condition |
-|------|-----------|
-| `400` | Invalid or expired token |
-
-**Related:** `authController.resetPassword`, `User` model
-
-**⚠️ Incomplete:** No success response returned; `passwordChangedAt` not updated.
+**⚠️ Incomplete:** No success response returned.
 
 ---
 
-### Get Profile (Test Route)
+## GET `/api/v1/users/profile`
 
 | Property | Value |
 |----------|-------|
-| **Method** | GET |
-| **Path** | `/api/v1/users/profile` |
-| **Purpose** | Test protected route — returns authenticated user |
-| **Authentication** | Yes |
-| **Roles** | Any authenticated user |
+| Purpose | Protected profile test route |
+| Auth | Yes |
 
 **Headers:** `Authorization: Bearer <token>`
 
-**Example Response (200):**
-```json
-{
-  "status": "success",
-  "message": "أهلاً بك في صفحتك الشخصية المحمية! 🔐",
-  "data": { "user": { ... } }
-}
-```
-
-**Related:** `authController.protect`
+**Success:** `200` — user data in response
 
 ---
 
-### Admin Dashboard (Test Route)
+## GET `/api/v1/users/admin-dashboard`
 
 | Property | Value |
 |----------|-------|
-| **Method** | GET |
-| **Path** | `/api/v1/users/admin-dashboard` |
-| **Authentication** | Yes |
-| **Roles** | `admin` only |
+| Auth | Yes |
+| Roles | `admin` |
 
-**Possible Errors:** `403` if not admin
+**Success:** `200` placeholder message
+
+**Errors:** `403`
 
 ---
 
-### Craftsman Orders (Test Route)
+## GET `/api/v1/users/craftsman-orders`
 
 | Property | Value |
 |----------|-------|
-| **Method** | GET |
-| **Path** | `/api/v1/users/craftsman-orders` |
-| **Authentication** | Yes |
-| **Roles** | `craftsman`, `admin` |
+| Auth | Yes |
+| Roles | `craftsman`, `admin` |
 
-Placeholder message only — **no actual order listing logic**.
+**Success:** `200` placeholder — no order listing logic
 
 ---
 
-## Service Routes — `/api/v1/services`
-
----
-
-### Get All Services
+## GET `/api/v1/services/`
 
 | Property | Value |
 |----------|-------|
-| **Method** | GET |
-| **Path** | `/api/v1/services/` |
-| **Purpose** | List active services for landing page |
-| **Authentication** | No |
+| Purpose | List active services |
+| Auth | No |
 
-**Example Response (200):**
-```json
-{
-  "status": "success",
-  "results": 4,
-  "data": {
-    "services": [
-      {
-        "_id": "...",
-        "nameAr": "سباكة",
-        "nameEn": "Plumbing",
-        "slug": "plumbing",
-        "icon": "wrench",
-        "isActive": true
-      }
-    ]
-  }
-}
-```
-
-**Related:** `serviceController.getAllServices`, `Service` model
+**Success:** `200` — `{ status, results, data: { services } }`
 
 ---
 
-### Create Service
+## POST `/api/v1/services/`
 
 | Property | Value |
 |----------|-------|
-| **Method** | POST |
-| **Path** | `/api/v1/services/` |
-| **Purpose** | Add a new service (intended for seeding/admin) |
-| **Authentication** | No |
+| Purpose | Create service |
+| Auth | No |
 
-**Request Body:** All `Service` schema fields (`nameAr`, `nameEn`, `slug`, `icon`, optional `isActive`)
+**Body:** `{ nameAr, nameEn, slug, icon, isActive? }`
 
-**Example Response (201):**
-```json
-{
-  "status": "success",
-  "data": { "service": { ... } }
-}
-```
+**Success:** `201`
 
-**Possible Errors:** `400` duplicate slug/name or missing fields
+**Errors:** `400` duplicate/validation
 
-**⚠️ Security gap:** No authentication or admin restriction on service creation.
+**⚠️ No auth restriction.**
 
 ---
 
-## Request Routes — `/api/v1/requests`
-
-All routes below use `router.use(authController.protect)` — **authentication required**.
-
----
-
-### Create Request
+## POST `/api/v1/requests/`
 
 | Property | Value |
 |----------|-------|
-| **Method** | POST |
-| **Path** | `/api/v1/requests/` |
-| **Authentication** | Yes |
-| **Roles** | Any authenticated user (typically `customer`) |
+| Purpose | Create service request |
+| Auth | Yes |
 
-**Request Body:**
+**Body:**
 
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `service` | ObjectId string | Yes | Service ID |
-| `address` | string | Yes | Text address |
-| `coordinates` | `[number, number]` | Yes | `[longitude, latitude]` |
-| `clientNotes` | string | No | |
-| `paymentMethod` | string | No | `CASH` \| `CARD` \| `VODAFONE_CASH` |
-| `scheduledAt` | ISO date string | No | Immediate if absent or past |
+| Field | Type | Required |
+|-------|------|----------|
+| service | ObjectId | Yes |
+| address | string | Yes |
+| coordinates | [lng, lat] | Yes |
+| clientNotes | string | No |
+| paymentMethod | string | No |
+| scheduledAt | date | No |
 
-**Example Request:**
-```json
-{
-  "service": "6a2e843ede228e7fc4e46bdc",
-  "address": "Dubai Marina, Building 4, Apt 402",
-  "coordinates": [31.2358, 30.0445],
-  "clientNotes": "Water leak under sink",
-  "paymentMethod": "CASH"
-}
-```
+**Success:** `201` — request with pricing
 
-**Example Response (201):**
-```json
-{
-  "status": "success",
-  "data": {
-    "request": {
-      "_id": "...",
-      "client": "...",
-      "craftsman": null,
-      "status": "PENDING_MATCHING",
-      "pricing": {
-        "baseFee": 120,
-        "emergencyFee": 30,
-        "totalAmount": 150
-      }
-    }
-  }
-}
-```
+**Pricing:** baseFee=120, emergencyFee=30 if immediate
+
+---
+
+## GET `/api/v1/requests/:id`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Get request by ID |
+| Auth | Yes |
+
+**⚠️ No ownership check** — any authenticated user can read any request.
+
+---
+
+## GET `/api/v1/requests/:requestId/nearby-craftsmen`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Find nearby available craftsmen |
+| Auth | Yes |
+
+**Query:** `radius` (meters, default **5000**)
+
+**Success:** `200` — `{ craftsmen: [{ name, phone, avatar, rating, distance }] }`
 
 **Internal Flow:**
-1. Extract body fields
-2. Compute `baseFee=120`, `emergencyFee=30` if immediate, else `0`
-3. `Request.create()` with `client: req.user._id`
-4. Return created request
-
-**Related:** `requestController.createRequest`, `Request` model
+1. Load request, extract coordinates
+2. `$geoNear` aggregation on User (role=craftsman, isAvailable=true)
+3. Add new craftsmen to `matchingPool`
+4. Return sorted by distance
 
 ---
 
-### Get Request by ID
+## GET `/api/v1/requests/:requestId/match-results`
 
 | Property | Value |
 |----------|-------|
-| **Method** | GET |
-| **Path** | `/api/v1/requests/:id` |
-| **Authentication** | Yes |
+| Purpose | Ranked craftsmen with match percentage |
+| Auth | Yes |
 
-**Params:** `id` — Request MongoDB ObjectId
+**Query:** `radius` (meters, default **10000**)
 
-**Example Response (200):**
-```json
-{
-  "status": "success",
-  "data": { "request": { ... } }
-}
-```
+**Success:** `200` — `{ matches: [{ matchPercentage, breakdown, distanceKm, ... }] }`
 
-**Possible Errors:** `404` not found, `400` invalid ID
+**Match Weights:**
 
-**⚠️ No authorization check** — any authenticated user can fetch any request by ID.
-
----
-
-### Find Nearby Craftsmen
-
-| Property | Value |
-|----------|-------|
-| **Method** | GET |
-| **Path** | `/api/v1/requests/:requestId/nearby-craftsmen` |
-| **Authentication** | Yes |
-
-**Params:** `requestId` — Request ID (used to read location coordinates)
-
-**Example Response (200):**
-```json
-{
-  "status": "success",
-  "results": 3,
-  "data": {
-    "craftsmen": [
-      {
-        "_id": "...",
-        "name": "Mohamed",
-        "phone": "010...",
-        "avatar": "default.png",
-        "location": { "type": "Point", "coordinates": [31.24, 30.04] },
-        "isAvailable": true
-      }
-    ]
-  }
-}
-```
+| Factor | Weight |
+|--------|--------|
+| Distance | 40% |
+| Rating | 30% |
+| Response time | 20% |
+| Prior history with client | 10% |
 
 **Internal Flow:**
-1. Load request by `requestId`
-2. Extract `[longitude, latitude]` from `request.location.coordinates`
-3. Query `User` with `$near`, `role: 'craftsman'`, `isAvailable: true`, `$maxDistance: 10000` (10 km)
-4. Return matching craftsmen (limited fields)
-
-**Related:** `requestController.findNearbyCraftsmen`, `User` geospatial index
+1. `$geoNear` find craftsmen within radius
+2. Aggregate completed request count per craftsman for this client
+3. Normalize each factor 0–1, compute weighted score
+4. Sort by `matchPercentage` descending
 
 ---
 
-### Update Request Status
+## POST `/api/v1/requests/:requestId/accept`
 
 | Property | Value |
 |----------|-------|
-| **Method** | PATCH |
-| **Path** | `/api/v1/requests/:requestId/status` |
-| **Authentication** | Yes |
-| **Roles** | Intended for assigned craftsman (enforced in controller) |
+| Purpose | Craftsman accepts request |
+| Auth | Yes |
+| Roles | `craftsman` (enforced in controller) |
 
-**Request Body:** `{ "status": "IN_PROGRESS" }`
+**Success:** `200` — request with status ACCEPTED
 
-**Valid status values:** Any string accepted — **no enum validation at controller level** (only schema enum on save)
+**DB Updates:**
+- `craftsman = req.user._id`, `status = ACCEPTED`
+- Update matchingPool entry (ACCEPTED, respondedAt)
+- `isAvailable = false` on craftsman
+- `recordResponseTime()` if pool entry existed
 
-**Internal Flow:**
-1. Load request
-2. Verify `currentRequest.craftsman === req.user._id`
-3. Update status and push to `statusHistory`
-4. Save and return
-
-**Possible Errors:** `404`, `403`
+**Errors:** `403` wrong role, `404` not found, `400` not PENDING_MATCHING
 
 ---
 
-### Complete Request
+## POST `/api/v1/requests/:requestId/reject`
 
 | Property | Value |
 |----------|-------|
-| **Method** | PATCH |
-| **Path** | `/api/v1/requests/:requestId/complete` |
-| **Authentication** | Yes |
-| **Roles** | Assigned craftsman only |
+| Purpose | Craftsman rejects offered request |
+| Auth | Yes |
+| Roles | `craftsman` |
 
-**Internal Flow:**
-1. Verify craftsman ownership
-2. Set status to `COMPLETED`
-3. Push status history
-4. Set craftsman `isAvailable: true`
-5. Return updated request
+**Success:** `200` — confirmation message
+
+**DB Updates:** matchingPool REJECTED + response time recorded
+
+**Errors:** `400` if request was not offered to this craftsman
 
 ---
 
-### Accept Request — **Not exposed via routes**
+## PATCH `/api/v1/requests/:requestId/status`
 
-`requestController.acceptRequest` exists in code but is **NOT registered** in `requestRoutes.js`. There is currently **no HTTP endpoint** to accept a request.
+| Property | Value |
+|----------|-------|
+| Purpose | Update request status |
+| Auth | Yes |
+| Roles | Assigned craftsman only |
+
+**Body:** `{ status }`
+
+**Errors:** `403` not assigned craftsman, `404` not found
+
+---
+
+## PATCH `/api/v1/requests/:requestId/complete`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Mark request COMPLETED |
+| Auth | Yes |
+| Roles | Assigned craftsman |
+
+**DB Updates:** status=COMPLETED, craftsman isAvailable=true
 
 ---
 
 ## 404 Handler
 
-| Property | Value |
-|----------|-------|
-| **Method** | Any |
-| **Path** | Any unmatched route |
-| **Response (404)** | `{ "status": "fail", "message": "can't find {url} on this server !" }` |
+Any unmatched route → `{ status: 'fail', message: "can't find {url} on this server !" }`
 
 ---
 
@@ -1184,486 +834,286 @@ All routes below use `router.use(authController.protect)` — **authentication r
 
 ```mermaid
 flowchart TD
-    A[Client HTTP Request] --> B[Express App - app.js]
-    B --> C[CORS Middleware]
-    C --> D[express.json / urlencoded]
-    D --> E{Route Match?}
-    E -->|/api/v1/users| F[userRoutes]
-    E -->|/api/v1/services| G[serviceRoutes]
-    E -->|/api/v1/requests| H[requestRoutes]
-    E -->|No match| I[404 JSON Handler]
-    H --> J{protect applied?}
-    J -->|Yes| K[authController.protect]
-    K --> L[JWT verify + load user]
-    L --> M[Controller Handler]
-    F --> M
-    G --> M
-    M --> N[Mongoose Model / MongoDB]
-    N --> O[JSON Response]
+    A[HTTP Request] --> B[server.js: MongoDB connect]
+    B --> C[app.js: Express]
+    C --> D[CORS]
+    D --> E[express.json / urlencoded 10mb]
+    E --> F{Route}
+    F -->|/users| G[userRoutes]
+    F -->|/services| H[serviceRoutes]
+    F -->|/requests| I[requestRoutes]
+    F -->|none| J[404 JSON]
+    I --> K[protect middleware]
+    K --> L[Controller try/catch]
+    L --> M[Mongoose / Aggregation]
+    M --> N[JSON Response]
 ```
 
-## Stage-by-Stage (Actual Implementation)
-
-| Stage | File | Details |
-|-------|------|---------|
-| **1. Server bootstrap** | `server.js` | Load `.env`, connect MongoDB with pool options, call `app.listen()` |
-| **2. Express app** | `app.js` | Create Express instance |
-| **3. CORS** | `app.js` | Restrict origin to `FRONTEND_URL`, allow credentials |
-| **4. Body parsing** | `app.js` | JSON and URL-encoded, 10 MB limit |
-| **5. Routing** | `src/routes/*` | Mount routers at `/api/v1/users`, `/services`, `/requests` |
-| **6. Authentication** | `requestRoutes.js` | `router.use(protect)` for all request routes; per-route on user routes |
-| **7. Authorization** | `userRoutes.js` | `restrictTo('admin')` etc. on specific routes |
-| **8. Controller** | `src/controllers/*` | Business logic, try/catch, direct model calls |
-| **9. Database** | Mongoose models | CRUD, geospatial queries |
-| **10. Response** | Controller | `res.status().json()` |
-| **11. 404** | `app.js` | Catch-all for unknown routes |
-
-**Not present:** validation middleware layer, service layer, global error handler, async wrapper utility.
+**Not present:** validation middleware layer, service layer, global error handler, async wrapper.
 
 ---
 
 # 9. Business Flows
 
-## 9.1 Customer Registration Flow
+## Customer Registration
 
 ```mermaid
 flowchart LR
-    A[POST /users/signup] --> B[User.create]
-    B --> C[Hash password]
-    C --> D[signToken]
-    D --> E[Return token + user]
+    A[POST /signup] --> B[User.create] --> C[Hash password] --> D[JWT] --> E[201 Response]
 ```
 
-**Routes:** `POST /api/v1/users/signup`  
-**Controller:** `authController.signup`  
-**DB:** New document in `users` collection  
-**Validations:** Mongoose schema (email, phone uniqueness, password min length)  
-**Edge cases:** Duplicate email/phone → 400; any role including admin can be set in body
-
----
-
-## 9.2 Customer Creates Request Flow
+## Customer Creates Request
 
 ```mermaid
 flowchart TD
-    A[Customer logged in] --> B[POST /requests]
-    B --> C[protect middleware]
-    C --> D[createRequest controller]
-    D --> E[Calculate pricing]
-    E --> F[Request.create PENDING_MATCHING]
-    F --> G[Return request with ID]
+    A[POST /requests + JWT] --> B[protect] --> C[createRequest]
+    C --> D[Calculate pricing]
+    D --> E[Request.create PENDING_MATCHING]
+    E --> F[201 Response]
 ```
 
-**Routes:** `POST /api/v1/requests/`  
-**Controller:** `requestController.createRequest`  
-**DB updates:** New `requests` document with `client: req.user._id`, `craftsman: null`  
-**Pricing logic:**
-- `baseFee = 120` always
-- `emergencyFee = 30` if no `scheduledAt` or scheduled time ≤ now
-- `totalAmount = baseFee + emergencyFee`
-
-**Edge cases:** Invalid `service` ObjectId → 400; missing address/coordinates → 400
-
----
-
-## 9.3 Craftsman Discovery / Nearby Craftsmen Flow
+## Craftsman Discovery (Nearby)
 
 ```mermaid
 flowchart TD
-    A[GET /requests/:requestId/nearby-craftsmen] --> B[Load Request]
-    B --> C[Extract coordinates]
-    C --> D[User.find with $near]
-    D --> E[Filter role=craftsman, isAvailable=true]
-    E --> F[Max distance 10km]
-    F --> G[Return craftsmen list]
+    A[GET /nearby-craftsmen] --> B[Load Request coords]
+    B --> C[$geoNear on Users]
+    C --> D[Update matchingPool]
+    D --> E[Return craftsmen + distance]
 ```
 
-**Routes:** `GET /api/v1/requests/:requestId/nearby-craftsmen`  
-**Controller:** `requestController.findNearbyCraftsmen`  
-**Edge cases:** Request not found → 404; no craftsmen in range → empty array with `results: 0`
+## Weighted Match Scoring
 
----
+```mermaid
+flowchart TD
+    A[GET /match-results] --> B[$geoNear craftsmen]
+    B --> C[Aggregate client history]
+    C --> D[Normalize 4 factors]
+    D --> E[Weighted score 0-100%]
+    E --> F[Sort descending]
+```
 
-## 9.4 Craftsman Accepts Request Flow
+## Craftsman Accepts Request
 
-**Controller implemented:** `requestController.acceptRequest`  
-**Route:** **Not implemented** — no endpoint registered
+```mermaid
+flowchart TD
+    A[POST /accept] --> B{role=craftsman?}
+    B -->|No| C[403]
+    B -->|Yes| D{PENDING_MATCHING?}
+    D -->|No| E[400]
+    D -->|Yes| F[Assign craftsman, ACCEPTED]
+    F --> G[Update matchingPool]
+    G --> H[recordResponseTime]
+    H --> I[isAvailable=false]
+```
 
-**Intended flow (from controller code):**
-1. Verify `req.user.role === 'craftsman'`
-2. Load request; must be `PENDING_MATCHING`
-3. Set `craftsman = req.user._id`, `status = ACCEPTED`
-4. Push status history
-5. Set craftsman `isAvailable = false`
+## Craftsman Rejects Request
 
-**Edge cases handled in code:** Wrong role → 403; already accepted → 400; not found → 404
+```mermaid
+flowchart TD
+    A[POST /reject] --> B{In matchingPool?}
+    B -->|No| C[400]
+    B -->|Yes| D[REJECTED + response time]
+```
 
----
+## Request Status Update / Completion
 
-## 9.5 Request Status Update Flow
+Craftsman-only; ownership verified. Complete sets `isAvailable=true`.
 
-**Route:** `PATCH /api/v1/requests/:requestId/status`  
-**Controller:** `requestController.updateRequestStatus`
+## Review and Rating Flow
 
-1. Load request
-2. Verify assigned craftsman matches `req.user`
-3. Set new status from body
-4. Append to `statusHistory`
-5. Save
+**Not implemented.** `User.rating` exists (default 4.5) and is used in match scoring, but **no API submits or recalculates ratings**.
 
-**Edge cases:** Not assigned craftsman → 403; no status transition validation (can jump to any status)
+## Notification Flow
 
----
+**Not implemented.**
 
-## 9.6 Request Completion Flow
+## Payment Flow
 
-**Route:** `PATCH /api/v1/requests/:requestId/complete`  
-**Controller:** `requestController.completeRequest`
-
-1. Verify craftsman ownership
-2. Set `status = COMPLETED`
-3. Push history
-4. Set user `isAvailable = true`
-
-**Note:** `completedAt`, `isPaid` not updated by controller.
-
----
-
-## 9.7 Review and Rating Flow
-
-**Not implemented.** No Review model or routes exist.
-
----
-
-## 9.8 Notification Flow
-
-**Not implemented.** No notification model, push, or email alerts for request events (except password reset email).
-
----
-
-## 9.9 Payment Flow
-
-**Partially implemented (data only):**
-- `paymentMethod` enum stored on request
-- `isPaid` boolean defaults to `false`
-- **No payment gateway, webhook, or mark-as-paid endpoint**
+**Partially implemented (data only):** `paymentMethod` and `isPaid` stored; no gateway or mark-paid endpoint.
 
 ---
 
 # 10. Geolocation Logic
 
-## How Coordinates Are Stored
+## Coordinate Storage
 
-### User (Craftsman) — Proper GeoJSON
-
+**User (craftsman)** — GeoJSON Point:
 ```javascript
 location: {
-  type: { type: String, default: 'Point', enum: ['Point'] },
-  coordinates: { type: [Number], default: [31.2357, 30.0444] }, // [lng, lat]
+  type: 'Point',
+  coordinates: [longitude, latitude],  // default Cairo area
   address: String
 }
 ```
 
-### Request — Plain Coordinate Array
-
+**Request** — plain array:
 ```javascript
 location: {
   address: String,
-  coordinates: [Number] // [longitude, latitude] — NOT wrapped in GeoJSON Point
+  coordinates: [longitude, latitude]
 }
 ```
-
-## GeoJSON Structure (User Model)
-
-MongoDB expects GeoJSON format for `2dsphere` indexes:
-
-```json
-{
-  "type": "Point",
-  "coordinates": [31.2357, 30.0444]
-}
-```
-
-Stored as nested Mongoose subdocument matching GeoJSON Point spec.
 
 ## 2dsphere Indexes
 
-| Collection | Index | File |
-|------------|-------|------|
-| `users` | `{ location: '2dsphere' }` | `userModel.js` |
-| `requests` | `{ "location.coordinates": "2dsphere" }` | `requestModel.js` |
+| Collection | Index |
+|------------|-------|
+| users | `{ location: '2dsphere' }` |
+| requests | `{ "location.coordinates": "2dsphere" }` (may be invalid — not GeoJSON) |
 
-The **User index** powers the live nearby search. The **Request index** may be invalid because `location.coordinates` alone is not valid GeoJSON for `$geoNear` on that path.
+## Geospatial Queries (Actual Code)
 
-## Nearby Search Query (Actual Code)
-
-From `requestController.findNearbyCraftsmen`:
+Both `findNearbyCraftsmen` and `getMatchResults` use **aggregation pipeline with `$geoNear`**:
 
 ```javascript
-const craftsmen = await User.find({
-  role: 'craftsman',
-  isAvailable: true,
-  location: {
-    $near: {
-      $geometry: {
-        type: 'Point',
-        coordinates: [longitude, latitude], // from request.location.coordinates
-      },
-      $maxDistance: 10000, // meters = 10 km
+User.aggregate([
+  {
+    $geoNear: {
+      near: { type: 'Point', coordinates: [longitude, latitude] },
+      distanceField: 'distance',
+      maxDistance: radiusInMeters,
+      query: { role: 'craftsman', isAvailable: true },
+      spherical: true,
     },
   },
-}).select('name phone avatar location isAvailable');
+  // ... $project, $sort
+]);
 ```
 
-## Distance Calculations
+## Distance
 
-MongoDB `$near` with `$maxDistance` uses spherical geometry on the 2dsphere index. Results are sorted by distance ascending. **No explicit distance value is returned** in the response.
+- Returned as `distance` in meters from `$geoNear`
+- `getMatchResults` also exposes `distanceKm` (rounded to 1 decimal)
+- Default search radii: **5 km** (nearby), **10 km** (match results)
 
-## Complete Nearby Craftsman Matching Process
+## Nearby Matching Process
 
 ```mermaid
 flowchart TD
-    A[Client requests nearby craftsmen for requestId] --> B[Load Request document]
-    B --> C[Read request.location.coordinates as lng, lat]
-    C --> D[Build GeoJSON Point from request coords]
-    D --> E[Query User collection]
-    E --> F{Filters}
-    F --> G[role = craftsman]
-    F --> H[isAvailable = true]
-    F --> I[$near within 10km]
-    I --> J[Return sorted craftsmen]
+    A[Request created with coordinates] --> B[Client calls nearby or match-results]
+    B --> C[Extract lng/lat from Request]
+    C --> D[$geoNear on User.location]
+    D --> E[Filter craftsman + available]
+    E --> F[Within radius]
+    F --> G[nearby: save to matchingPool]
+    F --> H[match-results: score + rank]
 ```
 
-**Important:** Matching uses **craftsman's stored `User.location`**, not real-time GPS updates. Craftsmen must have accurate `location.coordinates` set (defaults to Cairo if never updated).
+Craftsmen must have accurate `User.location` coordinates. Default is Cairo `[31.2357, 30.0444]`.
 
 ---
 
 # 11. Middleware Documentation
 
-San3a does not use a dedicated `middleware/` folder. Middleware functions live in `authController.js` or inline in route files.
+## Global (app.js)
 
-## Global Middleware (app.js)
+| Middleware | Purpose | Security |
+|------------|---------|----------|
+| cors | Allow FRONTEND_URL origin | Restricts cross-origin |
+| express.json | Parse JSON, 10mb limit | Payload size limit |
+| express.urlencoded | Parse forms, 10mb | Same |
+| 404 handler | Unknown routes | Returns fail JSON |
 
-| Middleware | Purpose | Input | Output | Errors | Security |
-|------------|---------|-------|--------|--------|----------|
-| `cors(corsOptions)` | Cross-origin access control | HTTP request origin | CORS headers | None thrown | Restricts to `FRONTEND_URL` |
-| `express.json({ limit: '10mb' })` | Parse JSON bodies | Request body | `req.body` | Express default 413 | Limits payload size |
-| `express.urlencoded({ limit: '10mb', extended: true })` | Parse form bodies | URL-encoded body | `req.body` | Express default | Same |
-| 404 handler | Unknown routes | Any unmatched path | 404 JSON | Always 404 | Information disclosure of URL |
-
-**Execution order:** CORS → JSON → URL-encoded → Routes → 404
-
-## `protect` (authController.js)
+## protect (authController.js)
 
 | Property | Value |
 |----------|-------|
-| **Purpose** | Verify JWT and attach user to `req.user` |
-| **Input** | `Authorization: Bearer <token>` or `req.cookies.user_token` |
-| **Output** | Sets `req.user`, calls `next()` |
-| **Errors** | 401 JSON for missing/invalid/expired token, inactive user, password changed |
-| **Security** | Core auth gate; logs token to console (`console.log("Token detected:", token)`) — **information leak in production** |
+| Input | Bearer header or cookie |
+| Output | `req.user`, `next()` |
+| Errors | 401 JSON |
+| Order | Applied via `router.use()` on request routes; per-route on user routes |
 
-## `restrictTo(...roles)` (authController.js)
+## restrictTo (authController.js)
 
 | Property | Value |
 |----------|-------|
-| **Purpose** | Role-based access control |
-| **Input** | `req.user.role` (must run after `protect`) |
-| **Output** | `next()` if role allowed |
-| **Errors** | 403 if role not in allowed list |
-
-## Route-Level Middleware Application
-
-| Router | Middleware |
-|--------|------------|
-| `requestRoutes.js` | `router.use(protect)` — all request routes |
-| `userRoutes.js` | `protect` + `restrictTo` on specific GET routes |
-| `serviceRoutes.js` | None |
+| Input | `req.user.role` |
+| Errors | 403 |
+| Order | After protect |
 
 ## Not Implemented
 
-- Global error handler middleware
-- `catchAsync` wrapper
-- Request validation middleware (Joi/express-validator)
-- Upload middleware (Multer)
-- Rate limiting
-- Helmet security headers
-- Cookie parser
+Global error handler, catchAsync, validators, upload middleware, rate limiting, Helmet, cookie-parser.
 
 ---
 
 # 12. Utility Functions
 
-## `sendEmail(options)` — `src/utils/email.js`
+## sendEmail(options) — `src/utils/email.js`
 
 | Property | Value |
 |----------|-------|
-| **Purpose** | Send plain-text emails via SMTP (password reset) |
-| **Used by** | `authController.forgotPassword` |
-| **Input** | `{ email, subject, message }` |
-| **Output** | Promise (resolves on send, throws on failure) |
-| **Dependencies** | `nodemailer`, env vars: `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD` |
+| Purpose | Send plain-text email via SMTP |
+| Used by | forgotPassword |
+| Input | `{ email, subject, message }` |
+| Env | EMAIL_HOST, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD |
 
-**Example usage:**
-```javascript
-await sendEmail({
-  email: user.email,
-  subject: 'Reset Password',
-  message: `Click here: ${resetURL}`
-});
-```
+## signToken(id) — `authController.js`
 
-**Note:** `from` address is hardcoded as `'Mohamed Madyan <Mohamedmadyan@io.com>'`.
+Generates 90-day JWT with user id.
 
-## `signToken(id)` — `src/controllers/authController.js`
+## normalize(value, min, max, lowerIsBetter) — `requestController.js`
 
-| Property | Value |
-|----------|-------|
-| **Purpose** | Generate JWT for authenticated user |
-| **Used by** | `signup`, `login` |
-| **Input** | User MongoDB `_id` |
-| **Output** | JWT string (90-day expiry) |
+Normalizes a value to 0–1 range for match scoring. Inverts when lower is better (distance, response time).
 
-## User Model Instance Methods
+## User.recordResponseTime(seconds) — `userModel.js`
 
-Documented in [Section 4.1](#41-user-model): `correctPassword`, `changePasswordAfter`, `createPasswordResetToken`.
-
-**No other utility/helper files exist.**
+Running average update for craftsman response metrics.
 
 ---
 
 # 13. Error Handling Strategy
 
-## Current Approach
+- **Local try/catch** in every controller
+- **No global error handler**
+- **No AppError class**
+- **No catchAsync wrapper**
+- `NODE_ENV` not used for error formatting
+- Inconsistent response shapes (some errors omit `status` field)
 
-Errors are handled **locally inside each controller** using `try/catch` blocks. There is **no centralized error handling**.
-
-## Operational vs Programming Errors
-
-| Type | Handling |
-|------|----------|
-| **Operational** (expected failures) | Returned as JSON with appropriate status codes (400, 401, 403, 404) |
-| **Programming** (unexpected bugs) | Some caught as 500 with `err.message`; uncaught errors may crash the process |
-
-## Global Error Handler
-
-**Not implemented.** No Express error-handling middleware (`app.use((err, req, res, next) => ...)`).
-
-## AppError
-
-**Not implemented.** No custom error class.
-
-## Async Error Handling
-
-Controllers use manual `try/catch`. **`catchAsync` wrapper not implemented.**  
-Note: `promisify` is imported in `authController.js` but **never used**.
-
-## Environment Differences
-
-- `NODE_ENV` is defined in `.env.example` but **not used** in backend code for error formatting or logging differentiation.
-- `npm run start:prod` sets `NODE_ENV=production` but app behavior is identical.
-
-## Response Format
-
-**Success:**
-```json
-{ "status": "success", "data": { ... } }
-```
-
-**Failure:**
-```json
-{ "status": "fail", "message": "...", "error": "..." }
-```
-
-Inconsistent: some endpoints (e.g. `forgotPassword` 404) omit `status` field.
+**Success format:** `{ status: 'success', data: {...} }`  
+**Failure format:** `{ status: 'fail', message, error? }`
 
 ---
 
 # 14. Security Documentation
 
-## Implemented Practices
+## Implemented
 
-| Practice | Implementation | Location |
-|----------|----------------|----------|
-| Password hashing | bcryptjs, 12 rounds | `userModel.js` pre-save |
-| JWT authentication | Bearer token | `authController.protect` |
-| Environment variables | Secrets in `.env` | `server.js`, `authController.js` |
-| JWT expiration | 90 days | `signToken()` |
-| Secure password reset | Hashed token in DB, 10 min expiry | `createPasswordResetToken()` |
-| Email validation | `validator.isEmail` | `userModel.js` |
-| Password excluded from queries | `select: false` | `userModel.js` |
-| CORS restriction | Single origin | `app.js` |
-| MongoDB injection | Mongoose parameterized queries | All model operations |
-| Inactive user blocking | `isActive` check | `protect` middleware |
+Password hashing, JWT auth, env-based secrets, hashed reset tokens, email validation, password select:false, CORS restriction, Mongoose parameterized queries, inactive user check, Docker non-root user.
 
-## Not Implemented / Gaps
+## Missing / Gaps
 
-| Item | Risk | Recommendation |
-|------|------|----------------|
-| **Helmet** | Missing security headers | Add `helmet()` |
-| **Rate limiting** | Brute-force on login/forgot password | Add `express-rate-limit` |
-| **cookie-parser** | Cookie auth path broken | Install or remove cookie check |
-| **Admin role on signup** | Privilege escalation | Restrict admin role creation |
-| **Unprotected service POST** | Anyone can add services | Add `protect` + `restrictTo('admin')` |
-| **Request GET authorization** | IDOR — any user reads any request | Verify client/craftsman ownership |
-| **JWT in console.log** | Token leakage in logs | Remove debug log in `protect` |
-| **No HTTPS enforcement** | Token interception | Enforce HTTPS in production |
-| **90-day JWT expiry** | Long-lived stolen tokens | Shorten expiry + refresh tokens |
-| **nodemailer not in package.json** | Runtime crash on forgot password | Add dependency |
-| **resetPassword incomplete** | Hung requests, no passwordChangedAt | Complete handler |
-| **XSS protection** | API returns JSON only — low server-side XSS risk | Frontend must sanitize; no CSP headers |
-| **Input validation library** | Incomplete body validation | Add Joi/express-validator |
-| **BCRYPT_ROUNDS env ignored** | Config drift | Use `process.env.BCRYPT_ROUNDS` |
+Helmet, rate limiting, admin signup restriction, unprotected service POST, IDOR on GET request, JWT console logging, incomplete reset password, no HTTPS enforcement, 90-day JWT expiry, cookie-parser for cookie auth.
 
 ---
 
 # 15. Environment Variables
 
-## Required Variables
-
-| Variable | Purpose | Example | Mandatory | Security |
-|----------|---------|---------|-----------|----------|
-| `MONGO_URI` | MongoDB connection string | `mongodb://localhost:27017/san3a` | Yes (defaults in code if missing) | Contains credentials in production — use secrets manager |
-| `JWT_SECRET` | JWT signing key | `super_secret_random_string_min_32_chars` | **Yes** — app fails at token ops without it | Must be long, random, never committed |
-| `PORT` | HTTP server port | `5000` | No (default 5000) | — |
-| `NODE_ENV` | Environment name | `development` / `production` | No | Not used in app logic currently |
-| `FRONTEND_URL` | CORS allowed origin | `http://localhost:3000` | No (default localhost:3000) | Set to exact production frontend URL |
-
-## Email Variables (for forgot password)
-
-| Variable | Purpose | Example | Mandatory | Security |
-|----------|---------|---------|-----------|----------|
-| `EMAIL_HOST` | SMTP host | `smtp.mailtrap.io` | Yes for email features | — |
-| `EMAIL_PORT` | SMTP port | `587` | Yes for email features | — |
-| `EMAIL_USERNAME` | SMTP user | `your_username` | Yes for email features | Secret |
-| `EMAIL_PASSWORD` | SMTP password | `your_password` | Yes for email features | Secret |
-
-## Defined but Unused
-
-| Variable | Notes |
-|----------|-------|
-| `BCRYPT_ROUNDS` | In `.env.example` but code hardcodes 12 |
+| Variable | Purpose | Example | Mandatory |
+|----------|---------|---------|-----------|
+| MONGO_URI | MongoDB connection | mongodb://localhost:27017/san3a | Yes |
+| JWT_SECRET | JWT signing | long random string | Yes |
+| PORT | Server port | 5000 | No |
+| NODE_ENV | Environment | development | No |
+| FRONTEND_URL | CORS origin | http://localhost:3000 | No |
+| EMAIL_HOST | SMTP host | smtp.mailtrap.io | For password reset |
+| EMAIL_PORT | SMTP port | 587 | For password reset |
+| EMAIL_USERNAME | SMTP user | — | For password reset |
+| EMAIL_PASSWORD | SMTP pass | — | For password reset |
+| BCRYPT_ROUNDS | Documented only | 10 | No (unused in code) |
 
 ## Example `.env.example`
 
 ```env
-# MongoDB Connection
 MONGO_URI=mongodb://localhost:27017/san3a
-
-# Server Configuration
 PORT=5000
 NODE_ENV=development
-
-# Frontend URL (for CORS)
 FRONTEND_URL=http://localhost:3000
-
-# JWT Secret (use a long random string in production)
 JWT_SECRET=your_jwt_secret_key_here
-
-# Bcrypt Salt Rounds (defined but not used by code — rounds hardcoded to 12)
 BCRYPT_ROUNDS=10
 
-# Email Configuration (required for forgot password)
 EMAIL_HOST=smtp.mailtrap.io
 EMAIL_PORT=587
 EMAIL_USERNAME=your_smtp_username
@@ -1674,83 +1124,47 @@ EMAIL_PASSWORD=your_smtp_password
 
 # 16. Deployment Documentation
 
-## Prerequisites
-
-- Node.js >= 16 (`package.json` engines)
-- MongoDB instance (local or Atlas)
-- npm
-
-## Installation
+## Local Installation
 
 ```bash
 cd backend
 npm install
 cp .env.example .env
-# Edit .env with your values
+# Edit .env
+npm run dev
 ```
 
 ## npm Scripts
 
-| Script | Command | Purpose |
-|--------|---------|---------|
-| `npm start` | `node server.js` | Production start |
-| `npm run dev` | `nodemon server.js` | Development with auto-reload |
-| `npm run start:prod` | `NODE_ENV=production node server.js` | Production with env flag |
-| `npm test` | Placeholder | **Not implemented** — exits with error |
-
-## Development Mode
-
-```bash
-cd backend
-npm run dev
-```
-
-Expected output:
-```
-✅ Database connected successfully!
-🚀 Server is running and listening on port 5000...
-```
-
-## Production Mode
-
-```bash
-cd backend
-npm run start:prod
-```
-
-## Database Setup
-
-1. Start MongoDB locally or provision MongoDB Atlas.
-2. Set `MONGO_URI` in `.env`.
-3. The database and collections are created automatically on first write.
+| Script | Command |
+|--------|---------|
+| start | node server.js |
+| dev | nodemon server.js |
+| start:prod | NODE_ENV=production node server.js |
+| test | Not implemented (placeholder) |
 
 ## Seed Data
 
-**Not implemented.** No seed script exists.
-
-To populate services manually:
 ```bash
-curl -X POST http://localhost:5000/api/v1/services/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nameAr": "سباكة",
-    "nameEn": "Plumbing",
-    "slug": "plumbing",
-    "icon": "wrench"
-  }'
+node seed.js
 ```
 
-## Build
+Seeds 4 services (cleaning, ac, plumbing, electricity) via upsert on slug.
 
-**Not applicable** — plain Node.js, no build step.
-
-## Start
+## Docker
 
 ```bash
-npm start
+# From backend directory — set MONGO_URI, JWT_SECRET, etc. in .env
+docker compose up --build
 ```
 
-API available at `http://localhost:5000/api/v1/`.
+- MongoDB: port 27017, volume `mongo-data`
+- Backend: port 5000, waits for mongo health check
+- Production image: Node 20 Alpine, dumb-init, non-root `appuser`
+
+## Database Setup
+
+MongoDB creates database/collections on first write. For Docker local dev, use `mongodb://mongo:27017/san3a` as noted in docker-compose comments.
 
 ---
 
@@ -1761,81 +1175,52 @@ API available at `http://localhost:5000/api/v1/`.
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant S as San3a API
+    participant S as API
     participant DB as MongoDB
 
-    C->>S: POST /users/signup or /login
-    S->>DB: Create/find User
-    S->>S: signToken(userId)
+    C->>S: POST /login
+    S->>DB: Verify user + password
     S-->>C: JWT token
-
-    C->>S: GET /requests (Authorization: Bearer token)
-    S->>S: protect: jwt.verify
-    S->>DB: findById user
-    S->>S: Check isActive, passwordChangedAt
-    S-->>C: Protected resource
+    C->>S: GET /requests + Bearer token
+    S->>S: protect: verify JWT
+    S->>DB: Load user
+    S-->>C: Protected data
 ```
 
 ## Password Reset
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant S as API
-    participant DB as MongoDB
-    participant E as Email SMTP
-
-    C->>S: POST /forgotPassword { email }
-    S->>DB: Find user, save hashed token
-    S->>E: Send reset link with plain token
-    S-->>C: 200 success
-
-    C->>S: POST /resetPassword/:token { password }
-    S->>DB: Find user by hashed token
-    S->>DB: Update password, clear token
-    Note over S,C: ⚠️ No response sent (incomplete)
+    C->>S: POST /forgotPassword
+    S->>S: Generate + hash token
+    S->>C: Email with plain token link
+    C->>S: POST /resetPassword/:token
+    S->>S: Update password
+    Note over S: ⚠️ No success response
 ```
 
-## Request Lifecycle
-
-See [Section 8](#8-request-lifecycle).
-
-## Customer Request Flow
+## Customer Request + Matching
 
 ```mermaid
 flowchart TD
-    R[Register/Login] --> C[POST /requests]
-    C --> P[PENDING_MATCHING]
-    P --> N[GET /nearby-craftsmen]
-    N --> W[Wait for craftsman accept]
-    W --> A[ACCEPTED - route not wired]
-    A --> AR[ARRIVED / IN_PROGRESS via PATCH status]
-    AR --> CO[PATCH /complete → COMPLETED]
+    A[POST /requests] --> B[PENDING_MATCHING]
+    B --> C[GET /nearby-craftsmen]
+    C --> D[matchingPool updated]
+    B --> E[GET /match-results]
+    E --> F[Ranked match scores]
+    F --> G[POST /accept or /reject]
+    G --> H[ACCEPTED + response metrics]
+    H --> I[PATCH status → complete]
 ```
 
-## Craftsman Matching Flow
-
-```mermaid
-flowchart LR
-    REQ[Request coordinates] --> NEAR[$near query on User.location]
-    NEAR --> FILT[role=craftsman AND isAvailable=true]
-    FILT --> DIST[maxDistance 10km]
-    DIST --> LIST[Return sorted craftsmen]
-```
-
-## Request Completion Flow
+## Request Completion
 
 ```mermaid
 sequenceDiagram
-    participant CR as Craftsman
-    participant API as PATCH /complete
-    participant DB as MongoDB
-
-    CR->>API: requestId + JWT
-    API->>API: Verify craftsman owns request
-    API->>DB: status = COMPLETED
-    API->>DB: User.isAvailable = true
-    API-->>CR: 200 + updated request
+    CR->>API: PATCH /complete
+    API->>DB: status=COMPLETED
+    API->>DB: craftsman isAvailable=true
+    API-->>CR: 200
 ```
 
 ---
@@ -1844,97 +1229,52 @@ sequenceDiagram
 
 ## Strengths
 
-1. **Clear MVC structure** — easy for new developers to navigate routes → controllers → models.
-2. **Solid auth foundation** — JWT, bcrypt hashing, password reset token hashing pattern, `passwordChangedAt` check in protect.
-3. **Geospatial matching** — proper GeoJSON on User model with `$near` query for craftsman discovery.
-4. **Request lifecycle modeling** — status enum, status history, pricing breakdown, payment method placeholder.
-5. **MongoDB connection hardening** — pool size, timeouts, reconnect handlers in `server.js`.
-6. **CORS configured** — origin restricted to frontend URL.
+1. **Smart matching algorithm** with weighted multi-factor scoring
+2. **matchingPool + response time tracking** for data-driven improvements
+3. **$geoNear aggregation** with configurable radius and distance in response
+4. **Accept/reject flows** properly wired with routes
+5. **Docker production setup** with multi-stage build, health checks, non-root user
+6. **Seed script** for reproducible service catalog
+7. **nodemailer** properly declared in dependencies
+8. Solid JWT + bcrypt auth foundation
 
 ## Weaknesses
 
-1. **Incomplete features** — `acceptRequest` not routed; `resetPassword` incomplete; no response on successful reset.
-2. **Missing dependencies** — `nodemailer` used but not in `package.json`; `bcrypt` listed but `bcryptjs` used.
-3. **No service layer or global error handler** — business logic and error handling duplicated across controllers.
-4. **Schema inconsistencies** — `statusHistory.changeAt` vs controller's `changedAt`; Request geo index on non-GeoJSON field.
-5. **No tests** — `npm test` is a placeholder.
-6. **Debug logging** — JWT printed to console in `protect`.
+1. **resetPassword incomplete** — no response, no passwordChangedAt
+2. **No review API** despite rating field in model
+3. **No global error handler** or service layer
+4. **Schema inconsistencies** — changeAt vs changedAt
+5. **bcrypt package unused** (bcryptjs used instead)
+6. **No automated tests**
 
-## Scalability Concerns
+## Scalability
 
-- Single Node process, no clustering or load balancer guidance.
-- No caching for service catalog reads.
-- Geospatial queries on growing user base need compound indexes (`role`, `isAvailable`, `location`).
-- No pagination on any list endpoint.
-- Synchronous email sending blocks forgot-password request.
+Single Node process; no caching; match scoring runs per request; consider compound geo index `{ role: 1, isAvailable: 1, location: '2dsphere' }`.
 
-## Maintainability Concerns
+## Security
 
-- Auth middleware mixed into controller file.
-- Hardcoded pricing (`120`, `30`) in controller instead of config/service.
-- Arabic and English error messages mixed without i18n structure.
-- Unused imports (`promisify` in authController).
+Priority fixes: complete reset flow, remove JWT logging, protect service POST, add request ownership checks, rate limit auth endpoints.
 
-## Performance Concerns
-
-- `findNearbyCraftsmen` loads full request before query — acceptable for MVP.
-- No database query projection on request populate (no populate used at all).
-- 10 MB body limit may be excessive for JSON-only API.
-
-## Security Concerns
-
-See [Section 14](#14-security-documentation). Highest priority: complete reset password flow, add nodemailer dependency, restrict admin signup, protect service creation, fix IDOR on get request, remove token logging.
-
-## Suggested Refactoring
-
-1. Extract `protect`, `restrictTo`, `signToken` to `src/middleware/authMiddleware.js`.
-2. Create `src/utils/catchAsync.js` and `src/utils/AppError.js`.
-3. Add global error handler in `app.js`.
-4. Wire `acceptRequest` route: `PATCH /:requestId/accept`.
-5. Complete `resetPassword` with `passwordChangedAt`, JWT response.
-6. Add `src/config/` for pricing constants and JWT options.
-
-## Suggested Folder Improvements
-
-```
-src/
-├── config/
-│   ├── db.js
-│   └── constants.js
-├── middleware/
-│   ├── authMiddleware.js
-│   └── errorMiddleware.js
-├── services/
-│   ├── authService.js
-│   ├── requestService.js
-│   └── emailService.js
-└── validators/
-    ├── authValidator.js
-    └── requestValidator.js
-```
-
-## Suggested Database Improvements
-
-1. Add compound index: `{ role: 1, isAvailable: 1, location: '2dsphere' }` on users.
-2. Fix Request location to GeoJSON Point or remove invalid 2dsphere index.
-3. Align `statusHistory` field names.
-4. Add `passwordConfirm` validation at schema level for signup/reset.
-5. Add Review collection when implementing ratings.
-
-## Production Readiness Checklist
+## Production Readiness
 
 | Item | Status |
 |------|--------|
-| Environment validation on startup | ❌ |
-| Health check endpoint (JSON) | ❌ (only plain text `/`) |
-| Logging (Winston/Pino) | ❌ |
-| Process manager (PM2) docs | ❌ |
-| HTTPS / reverse proxy | ❌ |
-| Database migrations/seeds | ❌ |
-| API versioning | ✅ `/api/v1` |
-| Automated tests | ❌ |
+| Docker | ✅ |
+| Seed script | ✅ |
+| Health check (Docker) | ✅ wget on `/` |
+| JSON health endpoint | ❌ |
+| Tests | ❌ |
 | CI/CD | ❌ |
 | Monitoring | ❌ |
+
+## Suggested Improvements
+
+1. Extract middleware to `src/middleware/`
+2. Add `PATCH /requests/:id/cancel` for customers
+3. Review model + POST rating after completion
+4. Complete resetPassword with JWT response
+5. Use `process.env.BCRYPT_ROUNDS` or remove from .env.example
+6. Add npm script: `"seed": "node seed.js"`
 
 ---
 

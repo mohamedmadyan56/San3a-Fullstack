@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const { promisify } = require('util');
 const sendEmail = require('../utils/email');
-
+const crypto = require('crypto');
 // دالة مساعدة لعمل الـ Token
 const signToken = id => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -22,7 +22,7 @@ exports.signup = async (req, res) => {
     });
 
     const token = signToken(newUser._id);
-    newUser.password = undefined; 
+    newUser.password = undefined;
 
     res.status(201).json({
       status: 'success',
@@ -34,7 +34,7 @@ exports.signup = async (req, res) => {
     res.status(400).json({
       status: 'fail',
       message: 'عذراً، حدث خطأ أثناء إنشاء الحساب',
-      error: err.message 
+      error: err.message
     });
   }
 };
@@ -52,7 +52,7 @@ exports.login = async (req, res) => {
       });
     }
 
-   
+
     const user = await User.findOne({ email }).select('+password');
 
     if (!user || !(await user.correctPassword(password, user.password))) {
@@ -88,9 +88,9 @@ exports.protect = async (req, res, next) => {
     // 1) البحث في الهيدرز (للموبايل أو الـ Postman)
     if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
       token = req.headers.authorization.split(" ")[1];
-    } 
+    }
     // 2) البحث في الكوكيز (للمتصفح والفرونت إيند بتاعك)
-    else if (req.cookies && req.cookies.user_token) { 
+    else if (req.cookies && req.cookies.user_token) {
       token = req.cookies.user_token;
     }
 
@@ -110,7 +110,7 @@ exports.protect = async (req, res, next) => {
 
     // 4) التأكد من أن المستخدم لسه موجود وحسابه نشط
     const currentUser = await User.findById(decoded.id).select('+isActive');
-    
+
     if (!currentUser || currentUser.isActive === false) {
       return res.status(401).json({
         status: 'fail',
@@ -193,10 +193,36 @@ exports.forgotPassword = async (req, res, next) => {
 
     return res.status(500).json({
       message: 'حدث خطأ في إرسال الإيميل',
-      error:err.message,
+      error: err.message,
     });
   }
 };
-exports.resetPassword=(req,res,next)=>{
+exports.resetPassword = async (req, res, next) => {
+
+  //1- Get User based on Token 
+  const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
+
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() }
+  });
+
+  if (!user) {
+    return res.status(400).json({
+      message: 'token  is invalid or has expired'
+    })
+  }
+
+  user.password = req.body.password; //خُد الباسورد الجديد اللي المستخدم كتبه في الـ request body وحطه مكان الباسورد القديم في الـ user object.
+  user.passwordConfrim = req.body.passwordConfrim;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+  await user.save();
+
+
+  //2-if token has not expired and there is a user , set the new Password
+  //3- Update changePasswordAt property for user
+  //4- log the user im , send JWT 
+
 
 }

@@ -3,9 +3,10 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation';
+
 export default function RegisterPage() {
-    const navigate = useRouter()
+  const navigate = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -30,7 +31,12 @@ export default function RegisterPage() {
 
       if (response.data.status === 'success') {
         setSuccessMessage('تم إنشاء الحساب بنجاح! 🎉');
-        localStorage.setItem('user_token', response.data.token);
+        // ملاحظة: استخدمنا مفتاح "token" بدل "user_token" عشان يتوافق مع باقي
+        // صفحات التطبيق (مثل صفحة طلب الخدمة) اللي بتقرا localStorage.getItem('token')
+        localStorage.setItem('token', response.data.token);
+
+        // التنقل بيحصل هنا، بعد التأكد الفعلي من نجاح التسجيل، وليس قبل استجابة السيرفر
+        navigate.push('/');
       }
     } catch (err: any) {
       const msg =
@@ -169,6 +175,7 @@ export default function RegisterPage() {
               <input
                 type="text"
                 required
+                minLength={2}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="أدخل اسمك الكامل"
@@ -201,6 +208,8 @@ export default function RegisterPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="+20 100 000 0000"
+                  pattern="^\+?[0-9\s]{8,15}$"
+                  title="يرجى إدخال رقم هاتف صحيح (أرقام فقط، يمكن أن يبدأ بـ +)"
                   className="w-full h-14 rounded-xl border border-gray-300 px-4 focus:outline-none focus:ring-2 focus:ring-[#007A4D] text-gray-900"
                 />
               </div>
@@ -213,6 +222,7 @@ export default function RegisterPage() {
               <input
                 type="password"
                 required
+                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="8 أحرف على الأقل"
@@ -220,7 +230,7 @@ export default function RegisterPage() {
               />
             </div>
 
-            {/* الجزء المعدل: شروط وسياسة الخصوصية على اليمين تماماً */}
+            {/* شروط وسياسة الخصوصية */}
             <div className="flex items-center gap-3 justify-start select-none">
               <input
                 id="terms"
@@ -233,7 +243,7 @@ export default function RegisterPage() {
               </label>
             </div>
 
-            <button onClick={()=>navigate.push('/')}
+            <button
               type="submit"
               disabled={isLoading}
               className="w-full bg-[#007A4D] hover:bg-[#006341] disabled:bg-gray-400 transition text-white py-4 rounded-xl text-lg font-medium"
@@ -244,14 +254,22 @@ export default function RegisterPage() {
 
           <div className="text-center mt-8">
             <span className="text-gray-500">لديك حساب بالفعل؟</span>
-            <button className="mr-2 font-semibold text-gray-900 hover:underline">
+            <button
+              type="button"
+              onClick={() => navigate.push('/login')}
+              className="mr-2 font-semibold text-gray-900 hover:underline"
+            >
               تسجيل الدخول
             </button>
           </div>
 
           <div className="flex justify-center gap-6 mt-12 text-lg">
-            <button className="text-[#007A4D] font-medium">العربية</button>
-            <button className="text-gray-500">English</button>
+            <button type="button" className="text-[#007A4D] font-medium">
+              العربية
+            </button>
+            <button type="button" className="text-gray-500">
+              English
+            </button>
           </div>
         </div>
       </div>

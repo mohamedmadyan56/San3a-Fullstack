@@ -1,8 +1,9 @@
-// next.config.ts
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  turbopack: {}, // يسكت الـ error
+  turbopack: {
+    root: __dirname,
+  },
 };
 
 export default nextConfig;

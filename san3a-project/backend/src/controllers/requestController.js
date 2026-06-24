@@ -177,3 +177,74 @@ exports.acceptRequest = async (req, res) => {
     });
   }
 };
+
+
+// تحديث حالة الطلب (من قِبل الفني)
+exports.updateRequestStatus = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { status } = req.body; // الحالة الجديدة اللي جاية من الفرونت (مثلا: IN_PROGRESS)
+
+    // التأكد إن اللي بيعدل هو الفني وصاحب الطلب ده بالذات
+    const currentRequest = await Request.findById(requestId);
+    if (!currentRequest) {
+      return res.status(404).json({ status: 'fail', message: 'الطلب غير موجود' });
+    }
+
+    if (currentRequest.craftsman.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ status: 'fail', message: 'غير مسموح لك بتعديل هذا الطلب' });
+    }
+
+    // تحديث الحالة وحفظ التاريخ
+    currentRequest.status = status;
+    currentRequest.statusHistory.push({
+      status,
+      changedAt: Date.now()
+    });
+
+    await currentRequest.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: `تم تحديث حالة الطلب إلى ${status}`,
+      data: { request: currentRequest }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+// إنهاء الطلب بنجاح
+exports.completeRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+
+    const currentRequest = await Request.findById(requestId);
+    if (!currentRequest) {
+      return res.status(404).json({ status: 'fail', message: 'الطلب غير موجود' });
+    }
+
+    // التأكد إن الفني المربوط بالطلب هو اللي بيقفل
+    if (currentRequest.craftsman.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ status: 'fail', message: 'عذراً، أنت لست الفني المسؤول عن هذا الطلب' });
+    }
+
+    // 1. تحديث حالة الطلب لـ COMPLETED
+    currentRequest.status = 'COMPLETED';
+    currentRequest.statusHistory.push({
+      status: 'COMPLETED',
+      changedAt: Date.now()
+    });
+    await currentRequest.save();
+
+    // 2. تحرير الفني ليكون متاحاً لطلبات أخرى فوراً ✨
+    await User.findByIdAndUpdate(req.user._id, { isAvailable: true });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'تم إنهاء الطلب بنجاح، وتحويل حالتك إلى متاح لتلقي طلبات جديدة!',
+      data: { request: currentRequest }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};

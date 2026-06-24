@@ -9,5 +9,6 @@ router.use(authController.protect);
 router.get('/:requestId/nearby-craftsmen', requestController.findNearbyCraftsmen);
 router.post("/", requestController.createRequest);
 router.get("/:id", requestController.getRequest);
-
+router.patch('/:requestId/status', requestController.updateRequestStatus);
+router.patch('/:requestId/complete', requestController.completeRequest);
 module.exports = router;

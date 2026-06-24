@@ -27,6 +27,24 @@ const requestSchema = new mongoose.Schema({
     changeAt:{type:Date,default:Date.now},
     note:{type:String}
   }],
+
+  /*
+   * matchingPool: قايمة الفنيين اللي ظهر الطلب عندهم في شاشة الرادار/المطابقة
+   * بنسجل offeredAt (وقت العرض) و respondedAt (وقت الرد، لو رد) و response
+   * عشان نقدر نحسب سرعة استجابة كل فني بدقة، ونعرف هل الفني شاف الطلب ورفضه
+   * أو لسه ماردّ.
+   */
+  matchingPool: [{
+    craftsman: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    offeredAt: { type: Date, default: Date.now },
+    respondedAt: { type: Date, default: null },
+    response: {
+      type: String,
+      enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED'],
+      default: 'PENDING'
+    }
+  }],
+
   arriveAt:{type:Date},
     startedAt: { type: Date },
   completedAt: { type: Date },

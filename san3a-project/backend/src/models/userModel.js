@@ -59,6 +59,29 @@ const userSchema = new mongoose.Schema({
     default: true
   },
 
+  // تقييم الفني (من 1 إلى 5)، يُحسب من تقييمات العملاء بعد إكمال الطلبات
+  rating: {
+    type: Number,
+    default: 4.5,
+    min: 1,
+    max: 5
+  },
+
+  /*
+   * تتبع سرعة الاستجابة الفعلية:
+   * كل مرة الفني يقبل أو يرفض طلب، بنسجل المدة (بالثواني) من وقت ما الطلب
+   * اتعرض عليه لحد ما رد. avgResponseTimeSeconds بيتحدّث تلقائياً (running average)
+   * عشان نتجنب الاحتفاظ بمصفوفة لا نهائية من السجلات.
+   */
+  avgResponseTimeSeconds: {
+    type: Number,
+    default: null // null يعني لسه مفيش بيانات كفاية (فني جديد)
+  },
+  responseCount: {
+    type: Number,
+    default: 0
+  },
+
   passwordChangedAt: Date,
 
   isActive: {
@@ -125,6 +148,23 @@ userSchema.methods.createPasswordResetToken = function () {
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 min
 
   return resetToken;
+};
+
+/* =======================
+   تحديث متوسط سرعة الاستجابة (Running average)
+   بيتنادى كل مرة الفني يرد (قبول أو رفض) على طلب معروض عليه
+======================= */
+userSchema.methods.recordResponseTime = async function (responseSeconds) {
+  const prevCount = this.responseCount || 0;
+  const prevAvg = this.avgResponseTimeSeconds || 0;
+
+  const newCount = prevCount + 1;
+  const newAvg = (prevAvg * prevCount + responseSeconds) / newCount;
+
+  this.avgResponseTimeSeconds = Math.round(newAvg);
+  this.responseCount = newCount;
+
+  await this.save({ validateBeforeSave: false });
 };
 
 const User = mongoose.model('User', userSchema);

@@ -67,13 +67,13 @@ export default function RegisterPage() {
             />
           </div>
 
-          <h1 className="text-6xl font-extrabold leading-tight mb-6">
+          <h1 className="text-6xl font-black leading-[1.1] tracking-tight mb-6">
             انضم إلى مجتمعنا من<br />
             المحترفين الموثوقين<br />
             وأصحاب المنازل السعداء
           </h1>
 
-          <p className="text-gray-300 text-lg mb-12">
+          <p className="text-gray-300 text-lg font-light leading-[1.9] mb-12">
             المنصة الأكثر موثوقية لخدمات المنازل الذكية الاحترافية.<br />
             آمنة، موثوقة، وسلسة.
           </p>
@@ -120,7 +120,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="text-center mb-8">
-            <h2 className="text-4xl font-bold text-gray-900 mb-2">
+            <h2 className="text-4xl font-black text-gray-900 mb-2 tracking-tight">
               إنشاء حساب
             </h2>
             <p className="text-gray-500">ابدأ رحلتك مع صنعة اليوم.</p>
@@ -144,26 +144,26 @@ export default function RegisterPage() {
             <button
               type="button"
               onClick={() => setRole('customer')}
-              className={`py-4 rounded-xl font-medium transition-all ${
-                role === 'customer'
-                  ? 'bg-[#007A4D] text-white shadow-md'
-                  : 'bg-[#EEF5F1] text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              أنا عميل
-            </button>
+                className={`py-4 rounded-xl font-bold transition-all tracking-tight ${
+                  role === 'customer'
+                    ? 'bg-[#007A4D] text-white shadow-md'
+                    : 'bg-[#EEF5F1] text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                أنا عميل
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setRole('craftsman')}
-              className={`py-4 rounded-xl font-medium transition-all ${
-                role === 'craftsman'
-                  ? 'bg-[#007A4D] text-white shadow-md'
-                  : 'bg-[#EEF5F1] text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              أنا فني محترف
-            </button>
+              <button
+                type="button"
+                onClick={() => setRole('craftsman')}
+                className={`py-4 rounded-xl font-bold transition-all tracking-tight ${
+                  role === 'craftsman'
+                    ? 'bg-[#007A4D] text-white shadow-md'
+                    : 'bg-[#EEF5F1] text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                أنا فني محترف
+              </button>
           </div>
 
           {/* فورم إدخال البيانات */}
@@ -257,7 +257,7 @@ export default function RegisterPage() {
             <button
               type="button"
               onClick={() => navigate.push('/login')}
-              className="mr-2 font-semibold text-gray-900 hover:underline"
+              className="mr-2 font-black text-gray-900 hover:underline"
             >
               تسجيل الدخول
             </button>

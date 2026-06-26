@@ -137,8 +137,8 @@ export default function MatchingPage({ params }: MatchingPageProps) {
       {/* المحتوى الرئيسي للرادار */}
       <main className="max-w-md w-full mx-auto px-6 py-12 flex-1 flex flex-col justify-center">
         <div className="text-center mb-4">
-          <h2 className="text-2xl font-extrabold text-gray-900 mb-2">جاري البحث عن أقرب فني متاح...</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tight">جاري البحث عن أقرب فني متاح...</h2>
+          <p className="text-sm text-gray-500 font-light leading-relaxed">
             يقوم النظام بمسح دائرة قطرها {searchRadiusExpanded ? '١٠' : '٥'} كم حول موقعك حالياً
           </p>
         </div>
@@ -146,7 +146,7 @@ export default function MatchingPage({ params }: MatchingPageProps) {
         {/* عداد الوقت المنقضي */}
         <div className="flex items-center justify-center gap-2 mb-2">
           <span className="w-1.5 h-1.5 rounded-full bg-[#0f5132] animate-pulse"></span>
-          <span className="text-xs font-mono font-bold text-gray-600 tracking-wider">
+          <span className="text-sm font-mono font-black text-gray-600 tracking-widest">
             {formatTime(elapsedSeconds)}
           </span>
         </div>

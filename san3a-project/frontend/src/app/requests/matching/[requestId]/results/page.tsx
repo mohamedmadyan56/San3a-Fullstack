@@ -165,8 +165,8 @@ export default function MatchResultsPage({ params }: ResultsPageProps) {
             {/* الكارد الرائد: أعلى نسبة تطابق */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
-                <h2 className="text-2xl font-extrabold text-gray-900 mb-1 text-center">درجة المطابقة</h2>
-                <p className="text-sm text-gray-500 text-center mb-6">
+                <h2 className="text-3xl font-black text-gray-900 mb-2 text-center tracking-tight">درجة المطابقة</h2>
+                <p className="text-sm text-gray-500 font-light leading-relaxed text-center mb-8">
                   بناءً على متطلباتك، يعتبر {topMatch.name} خياراً ممتازاً لهذه المهمة.
                 </p>
 
@@ -194,7 +194,7 @@ export default function MatchResultsPage({ params }: ResultsPageProps) {
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-4xl font-extrabold text-[#0f5132]">{topMatch.matchPercentage}%</span>
+                    <span className="text-5xl font-black text-[#0f5132] tracking-tight">{topMatch.matchPercentage}%</span>
                     <span className="text-sm text-gray-500 font-medium">تطابق</span>
                   </div>
                 </div>
@@ -230,8 +230,8 @@ export default function MatchResultsPage({ params }: ResultsPageProps) {
 
               {/* بطاقة جاهز للحجز */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                <h3 className="font-bold text-gray-900 mb-1">جاهز للحجز؟</h3>
-                <p className="text-sm text-gray-500 mb-4">
+                <h3 className="font-black text-gray-900 mb-1 tracking-tight">جاهز للحجز؟</h3>
+                <p className="text-sm text-gray-500 font-light leading-relaxed mb-4">
                   أكد اختيارك لـ {topMatch.name} لمباشرة العمل.
                 </p>
                 <div className="flex gap-3">
@@ -260,7 +260,7 @@ export default function MatchResultsPage({ params }: ResultsPageProps) {
             {/* قائمة كل النتائج */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-extrabold text-gray-900">تم العثور على {matches.length} نتائج</h3>
+                <h3 className="font-black text-gray-900 tracking-tight">تم العثور على {matches.length} نتائج</h3>
                 <span className="text-xs font-bold text-gray-500 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-full">
                   الأفضل مطابقة ▾
                 </span>
@@ -368,14 +368,14 @@ function BreakdownRow({
   score: number;
 }) {
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5 text-xs">
-        <span className="text-gray-400">{detail}</span>
+    <div className="mb-1">
+      <div className="flex items-center justify-between mb-2 text-xs">
+        <span className="text-gray-400 font-light">{detail}</span>
         <span className="font-bold text-gray-700">
           {label} <span className="text-gray-400 font-normal">{weightLabel}</span>
         </span>
       </div>
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
         <div
           className="h-full bg-[#0f5132] rounded-full"
           style={{ width: `${Math.min(Math.max(score, 0), 100)}%` }}

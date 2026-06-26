@@ -79,10 +79,10 @@ export default function LandingPage() {
 
           {/* النص والأزرار */}
           <div className="order-1 md:order-2 text-right">
-            <h1 className="text-3xl md:text-5xl font-extrabold text-white leading-tight mb-5">
+            <h1 className="text-4xl md:text-6xl font-black text-white leading-[1.15] tracking-tight mb-6">
               حرفيون موثوقون عند باب منزلك
             </h1>
-            <p className="text-sm md:text-base text-gray-300 leading-relaxed mb-8 max-w-md mr-0 ml-auto">
+            <p className="text-sm md:text-base text-gray-300 font-light leading-[1.9] mb-10 max-w-md mr-0 ml-auto">
               تواصل مع محترفي خدمات معتمدين وحاصلين على تقييمات عالية لجميع احتياجات صيانة وتحسين منزلك. سريع، موثوق، ومضمون.
             </p>
 
@@ -101,14 +101,14 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            <div className="flex gap-10 justify-end border-t border-white/15 pt-6">
+            <div className="flex gap-12 justify-end border-t border-white/15 pt-6">
               <div className="text-center">
-                <p className="text-xl font-extrabold text-white">4.9/5</p>
-                <p className="text-xs text-gray-400">متوسط التقييم</p>
+                <p className="text-3xl md:text-4xl font-black text-white tracking-tight leading-none">4.9/5</p>
+                <p className="text-xs text-gray-400 tracking-wide">متوسط التقييم</p>
               </div>
               <div className="text-center">
-                <p className="text-xl font-extrabold text-white">+10 آلاف</p>
-                <p className="text-xs text-gray-400">محترف معتمد</p>
+                <p className="text-3xl md:text-4xl font-black text-white tracking-tight leading-none">+10 آلاف</p>
+                <p className="text-xs text-gray-400 tracking-wide">محترف معتمد</p>
               </div>
             </div>
           </div>
@@ -130,8 +130,8 @@ export default function LandingPage() {
       {/* الخدمات */}
       <section className="bg-[#eef6ef]">
         <div className="max-w-6xl mx-auto px-6 py-16">
-          <h2 className="text-3xl font-extrabold text-gray-900 text-center mb-3">استكشف خدماتنا</h2>
-          <p className="text-sm text-gray-500 text-center mb-10">
+          <h2 className="text-4xl font-black text-gray-900 text-center mb-4 tracking-tight">استكشف خدماتنا</h2>
+          <p className="text-sm text-gray-500 font-light leading-relaxed text-center mb-12">
             اعثر على المحترف المناسب لأي مهمة، من الإصلاحات السريعة إلى التجديدات الكبرى.
           </p>
 
@@ -140,12 +140,12 @@ export default function LandingPage() {
               <Link
                 key={s.name}
                 href={`/requests/new?service=${encodeURIComponent(s.name)}`}
-                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col items-center gap-3 hover:border-[#0f5132]/40 hover:shadow-md transition-all"
+                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-4 hover:border-[#0f5132]/40 hover:shadow-md transition-all"
               >
-                <div className="w-14 h-14 rounded-full bg-[#f3f8f4] flex items-center justify-center text-2xl">
+                <div className="w-16 h-16 rounded-full bg-[#f3f8f4] flex items-center justify-center text-3xl">
                   {s.icon}
                 </div>
-                <span className="font-bold text-gray-900 text-sm">{s.name}</span>
+                <span className="font-medium text-gray-900 text-sm leading-relaxed">{s.name}</span>
               </Link>
             ))}
           </div>
@@ -156,8 +156,8 @@ export default function LandingPage() {
       <footer className="bg-gray-900 text-gray-300 py-10">
         <div className="max-w-6xl mx-auto px-6 grid md:grid-cols-2 gap-8">
           <div className="text-right md:order-2">
-            <h3 className="text-[#22c55e] font-extrabold text-xl mb-3">صنعة</h3>
-            <p className="text-sm text-gray-400 leading-relaxed max-w-xs mr-0 ml-auto">
+            <h3 className="text-[#22c55e] font-black text-xl mb-4 tracking-tight">صنعة</h3>
+            <p className="text-sm text-gray-400 font-light leading-[1.9] max-w-xs mr-0 ml-auto">
               نصلك بالمحترفين المحليين الموثوقين لجميع احتياجات منزلك.
             </p>
           </div>

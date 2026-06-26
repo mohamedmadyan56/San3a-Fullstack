@@ -196,8 +196,8 @@ export default function NewRequestPage() {
       <main className="max-w-3xl mx-auto px-6 py-10">
         {/* العنوان */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-extrabold text-gray-900 mb-2">طلب خدمة</h1>
-          <p className="text-gray-500">أخبرنا بما تحتاجه، وسنجد لك المحترف المناسب للمهمة.</p>
+          <h1 className="text-4xl font-black text-gray-900 mb-2 tracking-tight">طلب خدمة</h1>
+          <p className="text-gray-500 font-light leading-relaxed">أخبرنا بما تحتاجه، وسنجد لك المحترف المناسب للمهمة.</p>
         </div>
 
         {/* الستيبر */}
@@ -237,7 +237,7 @@ export default function NewRequestPage() {
 
             {/* اختيار نوع الخدمة - الـ Grid المرن المعدل */}
             <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4 text-right">بماذا تحتاج للمساعدة؟</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-4 text-right">بماذا تحتاج للمساعدة؟</h3>
               <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 justify-center">
                 {services.map((service) => {
                   const active = selectedServiceId === service._id;
@@ -256,7 +256,7 @@ export default function NewRequestPage() {
                         </span>
                       )}
                       <ServiceIcon name={service.slug} active={active} />
-                      <span className={`text-sm font-bold ${active ? 'text-[#0f5132]' : 'text-gray-700'}`}>
+                      <span className={`text-sm font-medium leading-relaxed ${active ? 'text-[#0f5132]' : 'text-gray-700'}`}>
                         {service.nameAr}
                       </span>
                     </button>
@@ -270,7 +270,7 @@ export default function NewRequestPage() {
 
             {/* موقع الخدمة */}
             <div>
-              <label className="block text-sm font-bold text-gray-900 mb-2 text-right">موقع الخدمة</label>
+              <label className="block text-sm font-bold text-gray-900 mb-3 text-right">موقع الخدمة</label>
               <div className="flex items-center justify-between border border-gray-200 rounded-xl px-4 py-3 bg-white">
                 <div className="flex items-center gap-2 text-gray-800">
                   <span>📍</span>

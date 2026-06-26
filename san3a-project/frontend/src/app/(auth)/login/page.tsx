@@ -83,12 +83,12 @@ export default function LoginPage() {
             />
           </div>
 
-          <h1 className="text-5xl font-extrabold leading-tight mb-6">
+          <h1 className="text-5xl font-black leading-[1.15] tracking-tight mb-6">
             مرحبًا بعودتك<br />
             إلى منصة صنعة
           </h1>
 
-          <p className="text-gray-300 text-lg mb-12">
+          <p className="text-gray-300 text-lg font-light leading-[1.9] mb-12">
             سجل الدخول للوصول إلى حسابك وإدارة خدماتك بسهولة.
           </p>
 
@@ -134,7 +134,7 @@ export default function LoginPage() {
           </div>
 
           <div className="text-center mb-8">
-            <h2 className="text-4xl font-bold text-gray-900 mb-2">
+            <h2 className="text-4xl font-black text-gray-900 mb-2 tracking-tight">
               تسجيل الدخول
             </h2>
             <p className="text-gray-500">أدخل بياناتك للمتابعة</p>
@@ -186,7 +186,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => router.push('/signup')}
-              className="mr-2 font-semibold text-gray-900 hover:underline"
+              className="mr-2 font-black text-gray-900 hover:underline"
             >
               إنشاء حساب
             </button>
